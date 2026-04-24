@@ -10,7 +10,7 @@ from mcp.server.models import InitializationOptions
 from . import __version__
 from .config import ServerConfig
 from .project.scanner import ProjectIndex
-from .tools import tier1_read, tier2_write, tier3_intents
+from .tools import lifecycle, tier1_read, tier2_write, tier3_intents
 from .tools.registry import ToolRegistry
 
 
@@ -26,6 +26,7 @@ def build_server(config: ServerConfig) -> tuple[Server, ToolRegistry]:
 
     if 1 in config.tiers:
         tier1_read.register(registry, config, index)
+        lifecycle.register(registry, config)
     if 2 in config.tiers:
         tier2_write.register(registry, config, index)
     if 3 in config.tiers:

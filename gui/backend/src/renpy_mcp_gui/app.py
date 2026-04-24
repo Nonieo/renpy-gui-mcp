@@ -213,6 +213,20 @@ def build_app(project_root: Path, sdk_root: Path, static_dir: Path | None = None
             args["file"] = body.file
         return await state.client.call("set_variable_default", args)
 
+    # ---------- preview lifecycle ----------
+
+    @app.get("/api/preview")
+    async def preview_status() -> Any:
+        return await state.client.call("get_preview_status")
+
+    @app.post("/api/preview")
+    async def preview_launch() -> Any:
+        return await state.client.call("launch_preview")
+
+    @app.delete("/api/preview")
+    async def preview_stop() -> Any:
+        return await state.client.call("stop_preview")
+
     # Asset upload — copy a user-supplied file into the project's assets dir.
     # Kept tiny on purpose; the MCP server doesn't have an asset-upload tool.
     from fastapi import UploadFile, File, Form

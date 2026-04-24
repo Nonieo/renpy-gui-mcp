@@ -1,0 +1,255 @@
+import { useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { CheckCircle2, AlertTriangle, AlertOctagon, Info, RefreshCw, Terminal } from "lucide-react";
+import { api } from "@/api/client";
+
+interface LintReport {
+  returncode: number;
+  summary: string | null;
+  stdout: string;
+  stderr: string;
+  error?: string;
+}
+
+type Severity = "error" | "warning" | "notice";
+
+interface ParsedFinding {
+  severity: Severity;
+  file: string | null;
+  line: number | null;
+  message: string;
+}
+
+// Lint output uses lines like:
+//   File "game/script.rpy", line 12: warning: bla bla
+//   File "game/script.rpy", line 12: error: bla
+//   File "game/script.rpy", line 12: bla (informational, no severity prefix)
+const FINDING_RE =
+  /^File "([^"]+)", line (\d+): (?:(error|warning): )?(.+)$/;
+
+function classify(rest: string, prefix: string | undefined): Severity {
+  if (prefix === "error") return "error";
+  if (prefix === "warning") return "warning";
+  // informational/notice lines are everything else lint emits with a file
+  // location but no severity prefix.
+  if (/never used|cannot find|missing/i.test(rest)) return "warning";
+  return "notice";
+}
+
+function parseFindings(stdout: string): ParsedFinding[] {
+  const out: ParsedFinding[] = [];
+  for (const line of stdout.split("\n")) {
+    const m = line.match(FINDING_RE);
+    if (!m) continue;
+    out.push({
+      severity: classify(m[3], m[2]),
+      file: m[1],
+      line: Number.parseInt(m[2], 10),
+      message: m[3],
+    });
+  }
+  return out;
+}
+
+export function Build() {
+  const qc = useQueryClient();
+  const [report, setReport] = useState<LintReport | null>(null);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showRaw, setShowRaw] = useState(false);
+
+  // Lint is a multi-second operation; trigger it on demand only.
+  const runLint = useMutation({
+    mutationFn: async () => {
+      setRunning(true);
+      setError(null);
+      try {
+        return await api<LintReport>("/api/lint");
+      } finally {
+        setRunning(false);
+      }
+    },
+    onSuccess: (data) => {
+      if (data.error) {
+        setError(data.error);
+        return;
+      }
+      setReport(data);
+      qc.invalidateQueries({ queryKey: ["overview"] });
+    },
+    onError: (err) => setError(String(err)),
+  });
+
+  const findings = useMemo(() => (report ? parseFindings(report.stdout) : []), [report]);
+  const counts = useMemo(() => {
+    const c = { error: 0, warning: 0, notice: 0 };
+    for (const f of findings) c[f.severity] += 1;
+    return c;
+  }, [findings]);
+
+  return (
+    <div className="p-8 h-full overflow-auto max-w-4xl">
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-semibold text-zinc-800">Build</h1>
+        <button
+          onClick={() => runLint.mutate()}
+          disabled={running}
+          className="px-3 py-1.5 text-sm rounded-md bg-accent text-white hover:bg-indigo-600 disabled:opacity-50 inline-flex items-center gap-1.5"
+        >
+          <RefreshCw className={running ? "w-4 h-4 animate-spin" : "w-4 h-4"} />
+          {running ? "Running lint…" : report ? "Re-run lint" : "Run lint"}
+        </button>
+      </div>
+
+      {!report && !running && !error && (
+        <div className="border border-dashed border-zinc-300 rounded-lg p-12 text-center text-zinc-500">
+          <Terminal className="w-8 h-8 mx-auto mb-2 text-zinc-400" />
+          <p className="text-sm">
+            No lint run yet. Click <span className="font-medium">Run lint</span> to invoke
+            Ren'Py's static analyzer through the MCP server.
+          </p>
+          <p className="text-xs mt-1 text-zinc-400">Takes a few seconds on small projects.</p>
+        </div>
+      )}
+
+      {error && (
+        <div className="border border-red-200 bg-red-50 rounded-lg p-4 text-sm text-red-700">
+          <strong>Error:</strong> {error}
+        </div>
+      )}
+
+      {report && (
+        <>
+          <SummaryCards counts={counts} returncode={report.returncode} summary={report.summary} />
+
+          {findings.length > 0 ? (
+            <FindingList findings={findings} />
+          ) : (
+            <CleanCard summary={report.summary} />
+          )}
+
+          <div className="mt-6">
+            <button
+              onClick={() => setShowRaw((s) => !s)}
+              className="text-xs text-zinc-500 hover:text-zinc-800 inline-flex items-center gap-1"
+            >
+              <Terminal className="w-3.5 h-3.5" />
+              {showRaw ? "Hide raw output" : "Show raw lint output"}
+            </button>
+            {showRaw && (
+              <pre className="mt-2 bg-zinc-900 text-zinc-100 text-xs font-mono p-4 rounded-md overflow-auto max-h-96 leading-relaxed">
+                {report.stdout || "(empty stdout)"}
+                {report.stderr && (
+                  <>
+                    {"\n--- stderr ---\n"}
+                    {report.stderr}
+                  </>
+                )}
+              </pre>
+            )}
+          </div>
+        </>
+      )}
+
+      <div className="mt-8 pt-4 border-t border-zinc-100 text-xs text-zinc-500 space-y-1">
+        <p>
+          <strong className="text-zinc-700">Coming next:</strong> distribution build (wraps a{" "}
+          <code className="font-mono">build_distribution</code> MCP tool) and
+          translation generation.
+        </p>
+        <p>
+          For now, distributions can be built directly:{" "}
+          <code className="font-mono">renpy.sh /path/to/project distribute</code>.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SummaryCards({
+  counts,
+  returncode,
+  summary,
+}: {
+  counts: Record<Severity, number>;
+  returncode: number;
+  summary: string | null;
+}) {
+  const items: { id: Severity; label: string; icon: React.ComponentType<{ className?: string }>; cls: string }[] =
+    [
+      { id: "error", label: "Errors", icon: AlertOctagon, cls: "border-red-200 bg-red-50 text-red-700" },
+      {
+        id: "warning",
+        label: "Warnings",
+        icon: AlertTriangle,
+        cls: "border-amber-200 bg-amber-50 text-amber-700",
+      },
+      { id: "notice", label: "Notices", icon: Info, cls: "border-sky-200 bg-sky-50 text-sky-700" },
+    ];
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+      {items.map(({ id, label, icon: Icon, cls }) => (
+        <div key={id} className={`border rounded-lg p-4 ${cls}`}>
+          <div className="flex items-center gap-2 text-xs uppercase tracking-wide font-semibold">
+            <Icon className="w-4 h-4" /> {label}
+          </div>
+          <div className="text-3xl font-bold mt-1">{counts[id]}</div>
+        </div>
+      ))}
+      <div className="sm:col-span-3 text-xs text-zinc-500 font-mono">
+        renpy.sh exit code: {returncode}
+        {summary && <span className="ml-3">{summary}</span>}
+      </div>
+    </div>
+  );
+}
+
+function FindingList({ findings }: { findings: ParsedFinding[] }) {
+  return (
+    <div className="space-y-1.5">
+      {findings.map((f, i) => (
+        <FindingRow key={i} finding={f} />
+      ))}
+    </div>
+  );
+}
+
+function FindingRow({ finding }: { finding: ParsedFinding }) {
+  const palette = {
+    error: { bg: "bg-red-50", border: "border-red-200", text: "text-red-700", label: "ERROR" },
+    warning: {
+      bg: "bg-amber-50",
+      border: "border-amber-200",
+      text: "text-amber-700",
+      label: "WARN",
+    },
+    notice: { bg: "bg-sky-50", border: "border-sky-200", text: "text-sky-700", label: "NOTE" },
+  }[finding.severity];
+
+  return (
+    <div className={`border ${palette.border} ${palette.bg} rounded p-2.5 text-sm flex gap-3`}>
+      <span className={`text-[10px] font-mono font-bold ${palette.text} pt-0.5`}>
+        {palette.label}
+      </span>
+      <div className="min-w-0">
+        <div className="text-xs text-zinc-500 font-mono">
+          {finding.file}
+          {finding.line !== null && `:${finding.line}`}
+        </div>
+        <div className="text-zinc-800">{finding.message}</div>
+      </div>
+    </div>
+  );
+}
+
+function CleanCard({ summary }: { summary: string | null }) {
+  return (
+    <div className="border border-emerald-200 bg-emerald-50 rounded-lg p-6 flex items-center gap-3 text-emerald-800">
+      <CheckCircle2 className="w-6 h-6" />
+      <div>
+        <div className="font-semibold">Lint passed clean.</div>
+        {summary && <div className="text-xs font-mono mt-0.5">{summary}</div>}
+      </div>
+    </div>
+  );
+}

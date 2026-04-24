@@ -6,6 +6,7 @@ import { StoryMap } from "@/panels/StoryMap";
 import { Characters } from "@/panels/Characters";
 import { Assets } from "@/panels/Assets";
 import { Variables } from "@/panels/Variables";
+import { Build } from "@/panels/Build";
 import { SceneInspector } from "@/panels/SceneInspector";
 import { Stub } from "@/components/Stub";
 
@@ -51,12 +52,7 @@ export default function App() {
                 description="Music browsing currently lives in the Assets panel — this view will gain mixer + per-scene controls."
               />
             )}
-            {active === "build" && (
-              <Stub
-                title="Build"
-                description="Lint runs through `get_lint_report`; distribution build wraps the SDK launcher. Both arrive next."
-              />
-            )}
+            {active === "build" && <Build />}
           </div>
           {active === "story" && selectedLabel && (
             <SceneInspector
