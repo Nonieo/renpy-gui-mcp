@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "renpy": {
+      "type": "stdio",
+      "command": "/path/to/renpy-mcp/.venv/bin/python",
+      "args": [
+        "-m",
+        "renpy_mcp",
+        "--project",
+        "/path/to/your/renpy/project",
+        "--sdk",
+        "/path/to/renpy-sdk"
+      ]
+    }
+  }
+}

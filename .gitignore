@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+
+# Ren'Py compiled artifacts inside the fixture project — we want the .rpy
+# sources tracked but never the generated .rpyc files.
+*.rpyc
+*.rpymc
+tests/fixtures/*/game/cache/
+tests/fixtures/*/game/saves/
+tests/fixtures/*/lint.txt
+tests/fixtures/*/log.txt
+tests/fixtures/*/tmp/
