@@ -136,7 +136,7 @@ After startup it opens `http://127.0.0.1:8765/` in your browser.
 | Preview button | Working | Header; toggles `launch_preview` / `stop_preview`; polls every 2s so external state changes (LLM-triggered) sync without refresh |
 | Animations | Stub | Ren'Py's ATL doesn't fit a multi-track timeline cleanly |
 | Mini-Games | Working | Lists scaffolded minigames (screen+label pairs); "+ New scaffold" modal calls `add_minigame_screen_scaffold` |
-| Music | Stub | Music browsing currently lives inside Assets |
+| Music | Working | Per-scene music table (joined from `list_audio` plays); inline edit via `set_scene_music`; music-library list; mixer stub noted |
 
 ### Two demo scenarios
 

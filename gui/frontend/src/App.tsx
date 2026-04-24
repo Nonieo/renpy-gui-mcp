@@ -7,6 +7,7 @@ import { Characters } from "@/panels/Characters";
 import { Assets } from "@/panels/Assets";
 import { Variables } from "@/panels/Variables";
 import { MiniGames } from "@/panels/MiniGames";
+import { Music } from "@/panels/Music";
 import { Build } from "@/panels/Build";
 import { SceneInspector } from "@/panels/SceneInspector";
 import { Stub } from "@/components/Stub";
@@ -42,12 +43,7 @@ export default function App() {
               />
             )}
             {active === "minigames" && <MiniGames />}
-            {active === "music" && (
-              <Stub
-                title="Music"
-                description="Music browsing currently lives in the Assets panel — this view will gain mixer + per-scene controls."
-              />
-            )}
+            {active === "music" && <Music />}
             {active === "build" && <Build />}
           </div>
           {active === "story" && selectedLabel && (
