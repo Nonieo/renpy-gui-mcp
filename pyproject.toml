@@ -36,6 +36,7 @@ gui = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.30",
     "watchdog>=4.0",
+    "httpx>=0.27",
 ]
 
 [project.scripts]

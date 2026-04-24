@@ -5,7 +5,10 @@ structured tools, designed for agent harnesses (hermes-agent, Claude Code).
 
 ## Status
 
-Pre-alpha. Milestone 1 (scaffold + Tier 1 read tools) in progress.
+Alpha. **41 MCP tools** across four tiers, **108 tests** passing. The
+RPBuilder GUI ships five working panels (Story Map with editable Scene
+Inspector, Characters, Assets, Variables, Build) plus a working Preview
+button.
 
 ## Quickstart
 
@@ -88,20 +91,22 @@ the Tier 2 primitives entirely.
 
 ## Tiers
 
-- **Tier 1** — read-only project introspection.
-- **Tier 2** — guarded write primitives (one statement per tool).
-- **Tier 3** — high-level intents (one creator action per tool).
-- **Tier 4** — escape hatches (raw diff apply, init-python exec) — opt-in.
+- **Tier 1** — 13 read-only introspection tools + 3 lifecycle tools
+  (`launch_preview`, `stop_preview`, `get_preview_status`) + `get_lint_report`.
+- **Tier 2** — 15 guarded write primitives (one statement per tool).
+- **Tier 3** — 10 high-level intents (one creator action per tool).
+- **Tier 4** — escape hatches (planned: raw diff apply, init-python exec).
 
 Configure which tiers load via `--tiers 1,2,3` (default: all but Tier 4).
+Tool descriptions are written for small-model accuracy; the convention is
+documented above.
 
 ## RPBuilder GUI
 
-A browser-based visual VN editor (`gui/`) sits on top of the same MCP server.
-Both the GUI and your LLM harness (Claude Code, hermes-agent, Cursor) talk
-to the same `renpy-mcp` instance and cooperate through the file system —
-edit a character in the GUI, see it reflected in your LLM session; have
-the LLM rewrite a scene, watch the GUI's Story Map update live.
+A browser-based visual VN editor (`gui/`) sits on top of the same MCP
+server. **No chat panel** — agent interaction happens in your existing LLM
+harness pointed at the same `renpy-mcp` server. The GUI is one MCP client
+among many; the file system is the integration point.
 
 ### Run
 
@@ -118,17 +123,58 @@ gui/dev.sh /path/to/your/renpy/project /path/to/renpy-sdk
 `run.sh` builds the frontend on first run if `gui/frontend/dist/` is missing.
 After startup it opens `http://127.0.0.1:8765/` in your browser.
 
+### Panel status
+
+| Panel | State | Notes |
+|---|---|---|
+| Story Map | Working | ReactFlow graph from `list_labels` + `read_label`; click a node to open the Scene Inspector |
+| Scene Inspector | Working | Side panel; edits background (`swap_background`), music (`set_scene_music`), and dialogue (`add_say`); flags unparsed lines |
+| Characters | Working | Card grid + edit drawer (`add_character` / `update_character`) |
+| Assets | Working | Tabbed Backgrounds / Sprites / Music / SFX from `list_images` + `list_audio`; usage-count badges |
+| Variables | Working | Table view; inline edit on `default` rows (`set_variable_default`); "+ New default" modal |
+| Build | Working | `get_lint_report` runner; severity-coded findings + summary cards; raw output viewer |
+| Preview button | Working | Header; toggles `launch_preview` / `stop_preview`; polls every 2s so external state changes (LLM-triggered) sync without refresh |
+| Animations | Stub | Ren'Py's ATL doesn't fit a multi-track timeline cleanly |
+| Mini-Games | Stub | `add_minigame_screen_scaffold` MCP tool is wired and usable from any harness |
+| Music | Stub | Music browsing currently lives inside Assets |
+
+### Two demo scenarios
+
+**Solo authoring (no LLM):** Open the GUI, build a scene visually in the
+Story Map's Inspector, hit Preview to play it. Every edit goes through
+`renpy-mcp` so the underlying `.rpy` is always lint-clean and writer-guarded.
+
+**LLM-assisted:** Run the GUI in one window and Claude Code (or
+hermes-agent / Cursor) in another, both pointed at the same project + the
+same `renpy-mcp` server config. Ask the LLM to "make Mei more sympathetic
+in the cafe scene"; the file watcher pushes the change to the GUI's
+WebSocket; the Story Map and Inspector refresh live without you touching
+the browser. Conversely, character edits you make in the GUI become
+visible to the LLM on its next `read_character` call.
+
 ### Architecture
 
-- **Backend** (`gui/backend/`) — FastAPI process that spawns a `renpy-mcp`
-  subprocess at startup, exposes REST + WebSocket endpoints to the browser,
-  and watches the project's `game/` tree for filesystem changes (so external
-  edits — from your LLM, from `git pull`, from a text editor — push live to
-  the UI).
-- **Frontend** (`gui/frontend/`) — Vite + React + TypeScript + TailwindCSS,
-  with ReactFlow for the Story Map graph. Three working panels (Story Map,
-  Characters, Assets) and stubs for Variables, Animations, Mini-Games,
-  Music, Build.
-- **No chat panel.** Agent interaction happens in your existing LLM harness
-  pointed at the same `renpy-mcp` server. The GUI is one MCP client among
-  many; the file system is the integration point.
+```
+  Browser
+    │ HTTP + WebSocket
+  FastAPI (gui/backend) ──── watchdog ── game/*.rpy *.png *.ogg
+    │ stdio + MCP                           ▲
+  renpy-mcp subprocess  ───────────────────┐│
+    │ subprocess.run                       ││
+  renpy.sh / renpy.exe                     ││
+                                            │
+  Other MCP clients (Claude Code, hermes-agent, Cursor)
+   ─── their own renpy-mcp subprocess ────┘
+```
+
+The GUI's backend spawns its own `renpy-mcp`; LLM harnesses spawn theirs.
+Both clients see the same files — coordination is implicit through the
+file system, watcher, and writer guardrails.
+
+### Wireframe roots
+
+The panel layout follows the RPBuilder wireframes (left rail with eight
+sections, right-docked Scene Inspector, top bar with Preview + Export).
+The wireframes' Animations panel was deliberately not built — Ren'Py's
+ATL is procedural enough that a multi-track timeline misrepresents how
+animations are actually authored.

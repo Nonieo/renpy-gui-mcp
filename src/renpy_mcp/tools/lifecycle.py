@@ -17,7 +17,11 @@ terminates the preview when the server shuts down.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import json
+import logging
+import os
+import signal
 from typing import Any
 
 import mcp.types as types
@@ -25,10 +29,37 @@ import mcp.types as types
 from ..config import ServerConfig, sdk_launcher_name
 from .registry import ToolDef, ToolRegistry
 
+log = logging.getLogger("renpy_mcp.lifecycle")
+
 _preview_proc: asyncio.subprocess.Process | None = None
+_atexit_registered = False
+
+
+def _terminate_preview_on_exit() -> None:
+    """Best-effort cleanup if the MCP server exits while a preview is alive.
+
+    Uses raw ``os.kill`` (not the asyncio Process API) because by atexit
+    time the event loop is gone and ``proc.terminate()`` would no-op or
+    raise. ProcessLookupError is benign — the process already exited.
+    """
+    global _preview_proc
+    if _preview_proc is None or _preview_proc.returncode is not None:
+        return
+    pid = _preview_proc.pid
+    try:
+        os.kill(pid, signal.SIGTERM)
+        log.info("atexit: SIGTERM sent to preview pid=%d", pid)
+    except ProcessLookupError:
+        pass
+    except OSError as exc:
+        log.warning("atexit: failed to terminate preview pid=%d: %s", pid, exc)
 
 
 def register(registry: ToolRegistry, config: ServerConfig) -> None:
+    global _atexit_registered
+    if not _atexit_registered:
+        atexit.register(_terminate_preview_on_exit)
+        _atexit_registered = True
     registry.add(_launch_preview(config))
     registry.add(_stop_preview(config))
     registry.add(_get_preview_status())

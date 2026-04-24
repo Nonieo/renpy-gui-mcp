@@ -83,3 +83,40 @@ async def test_launch_then_stop_via_fake_process(monkeypatch):
 def test_lifecycle_module_importable():
     assert hasattr(tools_pkg, "__name__")
     assert lifecycle.register
+
+
+def test_atexit_hook_registered_once():
+    """Calling register() multiple times must register the hook exactly once."""
+    # Reset the flag so we can observe the registration behavior cleanly.
+    lifecycle._atexit_registered = False  # type: ignore[attr-defined]
+
+    import atexit as atexit_mod
+
+    calls: list = []
+
+    def _spy(func, *args, **kwargs):
+        calls.append(func)
+
+    cfg = ServerConfig(project_root=FIXTURE_ROOT.resolve(), sdk_root=SDK_ROOT)
+
+    # First register: should hook into atexit.
+    original = atexit_mod.register
+    atexit_mod.register = _spy  # type: ignore[assignment]
+    try:
+        lifecycle.register(ToolRegistry(), cfg)
+        first_count = len(calls)
+        # Second register: must NOT add another hook.
+        lifecycle.register(ToolRegistry(), cfg)
+        second_count = len(calls)
+    finally:
+        atexit_mod.register = original  # type: ignore[assignment]
+
+    assert first_count == 1
+    assert second_count == 1
+
+
+def test_atexit_callback_no_op_when_idle():
+    """The atexit callback must not raise when there's no preview running."""
+    _reset_state()
+    # Should be silent and safe.
+    lifecycle._terminate_preview_on_exit()  # type: ignore[attr-defined]
