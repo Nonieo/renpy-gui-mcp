@@ -10,7 +10,7 @@ from mcp.server.models import InitializationOptions
 from . import __version__
 from .config import ServerConfig
 from .project.scanner import ProjectIndex
-from .tools import lifecycle, tier1_read, tier2_write, tier3_intents
+from .tools import lifecycle, tier1_read, tier2_write, tier3_intents, tier4_escape
 from .tools.registry import ToolRegistry
 
 
@@ -31,7 +31,8 @@ def build_server(config: ServerConfig) -> tuple[Server, ToolRegistry]:
         tier2_write.register(registry, config, index)
     if 3 in config.tiers:
         tier3_intents.register(registry, config, index)
-    # Tier 4 register hook lands here when escape hatches come online.
+    if 4 in config.tiers:
+        tier4_escape.register(registry, config, index)
 
     @server.list_tools()
     async def _list_tools() -> list[types.Tool]:

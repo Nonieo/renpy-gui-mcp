@@ -5,7 +5,7 @@ structured tools, designed for agent harnesses (hermes-agent, Claude Code).
 
 ## Status
 
-Alpha. **41 MCP tools** across four tiers, **108 tests** passing. The
+Alpha. **43 MCP tools** across four tiers, **123 tests** passing. The
 RPBuilder GUI ships five working panels (Story Map with editable Scene
 Inspector, Characters, Assets, Variables, Build) plus a working Preview
 button.
@@ -95,9 +95,12 @@ the Tier 2 primitives entirely.
   (`launch_preview`, `stop_preview`, `get_preview_status`) + `get_lint_report`.
 - **Tier 2** — 15 guarded write primitives (one statement per tool).
 - **Tier 3** — 10 high-level intents (one creator action per tool).
-- **Tier 4** — escape hatches (planned: raw diff apply, init-python exec).
+- **Tier 4** — 2 escape hatches: `apply_unified_diff` (strict context-match
+  patcher; supports creation via `--- /dev/null`, refuses deletion) and
+  `exec_python_in_init` (ast-validated `init python:` block appender).
 
-Configure which tiers load via `--tiers 1,2,3` (default: all but Tier 4).
+Configure which tiers load via `--tiers 1,2,3,4` (default: 1,2,3; Tier 4
+is opt-in because the escape hatches can touch arbitrary file content).
 Tool descriptions are written for small-model accuracy; the convention is
 documented above.
 
