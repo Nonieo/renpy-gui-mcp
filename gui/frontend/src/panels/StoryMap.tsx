@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Background,
@@ -7,12 +7,13 @@ import {
   ReactFlowProvider,
   type Edge,
   type Node,
+  type NodeMouseHandler,
 } from "@xyflow/react";
 import dagre from "dagre";
 import { api } from "@/api/client";
 import type { BranchGraph } from "@/api/types";
 
-function layout(graph: BranchGraph): { nodes: Node[]; edges: Edge[] } {
+function layout(graph: BranchGraph, selectedId: string | null): { nodes: Node[]; edges: Edge[] } {
   const g = new dagre.graphlib.Graph();
   g.setGraph({ rankdir: "LR", nodesep: 30, ranksep: 80 });
   g.setDefaultEdgeLabel(() => ({}));
@@ -30,20 +31,24 @@ function layout(graph: BranchGraph): { nodes: Node[]; edges: Edge[] } {
 
   const nodes: Node[] = graph.nodes.map((n) => {
     const pos = g.node(n.id);
+    const isSelected = n.id === selectedId;
+    const isStart = n.id === "start";
     return {
       id: n.id,
       position: { x: pos.x - NODE_W / 2, y: pos.y - NODE_H / 2 },
       data: { label: n.id, sayCount: n.say_count, file: n.file },
       type: "default",
       style: {
-        background: n.id === "start" ? "#1c1917" : "#ffffff",
-        color: n.id === "start" ? "#fafaf9" : "#18181b",
-        border: "1px solid #d4d4d8",
+        background: isStart ? "#1c1917" : "#ffffff",
+        color: isStart ? "#fafaf9" : "#18181b",
+        border: isSelected ? "2px solid #6366f1" : "1px solid #d4d4d8",
+        boxShadow: isSelected ? "0 0 0 3px rgb(99 102 241 / 0.18)" : undefined,
         borderRadius: 8,
         padding: "8px 14px",
         fontSize: 13,
         fontWeight: 500,
         width: NODE_W,
+        cursor: "pointer",
       },
     };
   });
@@ -64,13 +69,27 @@ function layout(graph: BranchGraph): { nodes: Node[]; edges: Edge[] } {
   return { nodes, edges };
 }
 
-export function StoryMap() {
+export function StoryMap({
+  selectedLabel,
+  onSelectLabel,
+}: {
+  selectedLabel: string | null;
+  onSelectLabel: (name: string | null) => void;
+}) {
   const graph = useQuery({
     queryKey: ["graph"],
     queryFn: () => api<BranchGraph>("/api/graph"),
   });
 
-  const laidOut = useMemo(() => (graph.data ? layout(graph.data) : null), [graph.data]);
+  const laidOut = useMemo(
+    () => (graph.data ? layout(graph.data, selectedLabel) : null),
+    [graph.data, selectedLabel],
+  );
+
+  const onNodeClick = useCallback<NodeMouseHandler>(
+    (_evt, node) => onSelectLabel(node.id),
+    [onSelectLabel],
+  );
 
   if (graph.isLoading) {
     return <div className="p-8 text-sm text-zinc-500">Loading project graph…</div>;
@@ -88,6 +107,10 @@ export function StoryMap() {
         <ReactFlow
           nodes={laidOut.nodes}
           edges={laidOut.edges}
+          onNodeClick={onNodeClick}
+          onPaneClick={() => onSelectLabel(null)}
+          nodesDraggable={false}
+          nodesConnectable={false}
           fitView
           fitViewOptions={{ padding: 0.15 }}
           proOptions={{ hideAttribution: true }}

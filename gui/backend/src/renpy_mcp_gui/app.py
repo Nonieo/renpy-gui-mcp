@@ -54,6 +54,15 @@ class UpdateCharacter(BaseModel):
     color: str | None = None
 
 
+class AddDialogueLine(BaseModel):
+    character: str | None = None  # omit for narration
+    text: str
+
+
+class SwapBackground(BaseModel):
+    new_background: str
+
+
 def _make_lifespan(project_root: Path, sdk_root: Path):
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -159,6 +168,19 @@ def build_app(project_root: Path, sdk_root: Path, static_dir: Path | None = None
     async def update_character(var: str, body: UpdateCharacter = Body(...)) -> Any:
         args = {"var": var, **body.model_dump(exclude_none=True)}
         return await state.client.call("update_character", args)
+
+    @app.post("/api/labels/{name}/dialogue")
+    async def append_dialogue(name: str, body: AddDialogueLine = Body(...)) -> Any:
+        args: dict[str, Any] = {"label": name, "text": body.text}
+        if body.character is not None:
+            args["character"] = body.character
+        return await state.client.call("add_say", args)
+
+    @app.post("/api/labels/{name}/background")
+    async def swap_label_background(name: str, body: SwapBackground = Body(...)) -> Any:
+        return await state.client.call(
+            "swap_background", {"label": name, "new_background": body.new_background}
+        )
 
     # Asset upload — copy a user-supplied file into the project's assets dir.
     # Kept tiny on purpose; the MCP server doesn't have an asset-upload tool.
