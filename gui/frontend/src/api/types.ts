@@ -41,3 +41,11 @@ export interface AudioListing {
   files: { asset_path: string; size_bytes: number }[];
   plays: { channel: string; asset: string; file: string; line: number }[];
 }
+
+export interface VariableInfo {
+  name: string;
+  kind: "default" | "define";
+  value: string;
+  file: string;
+  line: number;
+}

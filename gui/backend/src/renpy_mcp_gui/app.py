@@ -63,6 +63,18 @@ class SwapBackground(BaseModel):
     new_background: str
 
 
+class SetSceneMusic(BaseModel):
+    asset: str  # empty string emits `stop music`
+    fadein: float | None = None
+    loop: bool = False
+    validate_asset: bool = True
+
+
+class SetVariableDefault(BaseModel):
+    value: str
+    file: str | None = None
+
+
 def _make_lifespan(project_root: Path, sdk_root: Path):
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -181,6 +193,25 @@ def build_app(project_root: Path, sdk_root: Path, static_dir: Path | None = None
         return await state.client.call(
             "swap_background", {"label": name, "new_background": body.new_background}
         )
+
+    @app.post("/api/labels/{name}/music")
+    async def set_label_music(name: str, body: SetSceneMusic = Body(...)) -> Any:
+        args: dict[str, Any] = {
+            "label": name,
+            "asset": body.asset,
+            "loop": body.loop,
+            "validate_asset": body.validate_asset,
+        }
+        if body.fadein is not None:
+            args["fadein"] = body.fadein
+        return await state.client.call("set_scene_music", args)
+
+    @app.put("/api/variables/{name}")
+    async def upsert_variable_default(name: str, body: SetVariableDefault = Body(...)) -> Any:
+        args: dict[str, Any] = {"name": name, "value": body.value}
+        if body.file is not None:
+            args["file"] = body.file
+        return await state.client.call("set_variable_default", args)
 
     # Asset upload — copy a user-supplied file into the project's assets dir.
     # Kept tiny on purpose; the MCP server doesn't have an asset-upload tool.

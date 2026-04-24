@@ -5,6 +5,7 @@ import { useFileWatcher } from "@/api/ws";
 import { StoryMap } from "@/panels/StoryMap";
 import { Characters } from "@/panels/Characters";
 import { Assets } from "@/panels/Assets";
+import { Variables } from "@/panels/Variables";
 import { SceneInspector } from "@/panels/SceneInspector";
 import { Stub } from "@/components/Stub";
 
@@ -31,12 +32,7 @@ export default function App() {
             )}
             {active === "characters" && <Characters />}
             {active === "assets" && <Assets />}
-            {active === "variables" && (
-              <Stub
-                title="Variables"
-                description="Browse `default` and `define` declarations from the project. Editing lands next."
-              />
-            )}
+            {active === "variables" && <Variables />}
             {active === "animations" && (
               <Stub
                 title="Animations"

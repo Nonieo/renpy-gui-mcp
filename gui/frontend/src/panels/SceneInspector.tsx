@@ -54,7 +54,7 @@ export function SceneInspector({ name, onClose }: { name: string; onClose: () =>
             </Section>
 
             <Section icon={<Music className="w-4 h-4" />} title="Music">
-              <ReadOnly value={parsed.music ?? "—"} />
+              <MusicField labelName={name} current={parsed.music} />
             </Section>
 
             <Section icon={<ChevronRight className="w-4 h-4" />} title={`Characters on screen (${parsed.shows.length})`}>
@@ -144,10 +144,66 @@ function Section({
   );
 }
 
-function ReadOnly({ value }: { value: string }) {
+function MusicField({ labelName, current }: { labelName: string; current: string | null }) {
+  const qc = useQueryClient();
+  const [draft, setDraft] = useState(current ?? "");
+  const [loop, setLoop] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const dirty = draft.trim() !== (current ?? "").trim();
+
+  const setMusic = useMutation({
+    mutationFn: () =>
+      api<{ summary?: string; error?: string }>(
+        `/api/labels/${encodeURIComponent(labelName)}/music`,
+        {
+          method: "POST",
+          // Empty string tells the backend to emit `stop music`. Otherwise we
+          // send the asset path; backend defaults validate_asset=true so the
+          // user gets a clear error when the file is missing.
+          json: { asset: draft.trim(), loop, validate_asset: draft.trim() !== "" },
+        },
+      ),
+    onSuccess: (data) => {
+      if (data.error) {
+        setError(data.error);
+        return;
+      }
+      qc.invalidateQueries({ queryKey: ["label", labelName] });
+      qc.invalidateQueries({ queryKey: ["audio"] });
+    },
+    onError: (err) => setError(String(err)),
+  });
+
   return (
-    <div className="px-2 py-1.5 bg-zinc-50 border border-zinc-200 rounded text-xs font-mono text-zinc-700">
-      {value}
+    <div className="space-y-1.5">
+      <input
+        type="text"
+        value={draft}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          setError(null);
+        }}
+        placeholder="audio/spring_theme.ogg (or empty for stop music)"
+        className="w-full px-2 py-1.5 border border-zinc-200 rounded text-xs font-mono"
+      />
+      <label className="flex items-center gap-1.5 text-xs text-zinc-600">
+        <input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} />
+        loop
+      </label>
+      {error && <div className="text-xs text-red-600">{error}</div>}
+      {dirty && (
+        <button
+          onClick={() => setMusic.mutate()}
+          disabled={setMusic.isPending}
+          className="px-2 py-1 text-xs rounded bg-accent text-white hover:bg-indigo-600 disabled:opacity-50"
+        >
+          {setMusic.isPending
+            ? "Saving…"
+            : draft.trim() === ""
+              ? "Stop music"
+              : "Set music"}
+        </button>
+      )}
     </div>
   );
 }
