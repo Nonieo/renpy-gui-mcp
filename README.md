@@ -135,7 +135,7 @@ After startup it opens `http://127.0.0.1:8765/` in your browser.
 | Build | Working | `get_lint_report` runner; severity-coded findings + summary cards; raw output viewer |
 | Preview button | Working | Header; toggles `launch_preview` / `stop_preview`; polls every 2s so external state changes (LLM-triggered) sync without refresh |
 | Animations | Stub | Ren'Py's ATL doesn't fit a multi-track timeline cleanly |
-| Mini-Games | Stub | `add_minigame_screen_scaffold` MCP tool is wired and usable from any harness |
+| Mini-Games | Working | Lists scaffolded minigames (screen+label pairs); "+ New scaffold" modal calls `add_minigame_screen_scaffold` |
 | Music | Stub | Music browsing currently lives inside Assets |
 
 ### Two demo scenarios

@@ -75,6 +75,13 @@ class SetVariableDefault(BaseModel):
     file: str | None = None
 
 
+class AddMinigameScaffold(BaseModel):
+    name: str
+    on_complete_label: str
+    screens_file: str | None = None
+    label_file: str | None = None
+
+
 def _make_lifespan(project_root: Path, sdk_root: Path):
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -212,6 +219,12 @@ def build_app(project_root: Path, sdk_root: Path, static_dir: Path | None = None
         if body.file is not None:
             args["file"] = body.file
         return await state.client.call("set_variable_default", args)
+
+    @app.post("/api/minigames")
+    async def add_minigame(body: AddMinigameScaffold = Body(...)) -> Any:
+        return await state.client.call(
+            "add_minigame_screen_scaffold", body.model_dump(exclude_none=True)
+        )
 
     # ---------- preview lifecycle ----------
 

@@ -170,6 +170,39 @@ def test_swap_background_returns_diff(app_client):
     assert "scene bg cafe" not in cafe_block
 
 
+def test_add_minigame_scaffold_creates_screen_and_label(app_client):
+    client, proj = app_client
+    r = client.post(
+        "/api/minigames",
+        json={"name": "fishing", "on_complete_label": "ending"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "scaffolded minigame `fishing`" in body["summary"]
+    assert len(body["diffs"]) == 2
+    screens_text = (proj / "game/screens.rpy").read_text()
+    script_text = (proj / "game/script.rpy").read_text()
+    assert "screen fishing_minigame():" in screens_text
+    assert "label fishing_play:" in script_text
+    assert "jump ending" in script_text
+
+
+def test_add_minigame_scaffold_rejects_duplicate(app_client):
+    client, _ = app_client
+    first = client.post(
+        "/api/minigames",
+        json={"name": "puzzle", "on_complete_label": "ending"},
+    )
+    assert first.status_code == 200
+    assert "summary" in first.json()
+    second = client.post(
+        "/api/minigames",
+        json={"name": "puzzle", "on_complete_label": "ending"},
+    )
+    assert second.status_code == 200
+    assert "already exists" in second.json()["error"]
+
+
 def test_set_scene_music_returns_diff(app_client):
     client, proj = app_client
     r = client.post(

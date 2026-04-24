@@ -6,6 +6,7 @@ import { StoryMap } from "@/panels/StoryMap";
 import { Characters } from "@/panels/Characters";
 import { Assets } from "@/panels/Assets";
 import { Variables } from "@/panels/Variables";
+import { MiniGames } from "@/panels/MiniGames";
 import { Build } from "@/panels/Build";
 import { SceneInspector } from "@/panels/SceneInspector";
 import { Stub } from "@/components/Stub";
@@ -40,12 +41,7 @@ export default function App() {
                 description="ATL transforms and timing — Ren'Py's animation primitives don't map cleanly to a multi-track timeline yet."
               />
             )}
-            {active === "minigames" && (
-              <Stub
-                title="Mini-Games"
-                description="Use the renpy-mcp `add_minigame_screen_scaffold` tool today; a dedicated panel ships next."
-              />
-            )}
+            {active === "minigames" && <MiniGames />}
             {active === "music" && (
               <Stub
                 title="Music"

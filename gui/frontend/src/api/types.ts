@@ -49,3 +49,10 @@ export interface VariableInfo {
   file: string;
   line: number;
 }
+
+export interface ScreenInfo {
+  name: string;
+  file: string;
+  start_line: number;
+  end_line: number;
+}
