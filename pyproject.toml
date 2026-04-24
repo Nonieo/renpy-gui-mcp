@@ -32,12 +32,18 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.6",
 ]
+gui = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.30",
+    "watchdog>=4.0",
+]
 
 [project.scripts]
 renpy-mcp = "renpy_mcp.__main__:main"
+renpy-mcp-gui = "renpy_mcp_gui.__main__:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/renpy_mcp"]
+packages = ["src/renpy_mcp", "gui/backend/src/renpy_mcp_gui"]
 
 [tool.ruff]
 line-length = 100

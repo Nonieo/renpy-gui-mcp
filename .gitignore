@@ -16,3 +16,9 @@ tests/fixtures/*/game/saves/
 tests/fixtures/*/lint.txt
 tests/fixtures/*/log.txt
 tests/fixtures/*/tmp/
+
+# Frontend
+gui/frontend/node_modules/
+gui/frontend/dist/
+gui/frontend/.vite/
+gui/frontend/*.tsbuildinfo

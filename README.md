@@ -94,3 +94,41 @@ the Tier 2 primitives entirely.
 - **Tier 4** — escape hatches (raw diff apply, init-python exec) — opt-in.
 
 Configure which tiers load via `--tiers 1,2,3` (default: all but Tier 4).
+
+## RPBuilder GUI
+
+A browser-based visual VN editor (`gui/`) sits on top of the same MCP server.
+Both the GUI and your LLM harness (Claude Code, hermes-agent, Cursor) talk
+to the same `renpy-mcp` instance and cooperate through the file system —
+edit a character in the GUI, see it reflected in your LLM session; have
+the LLM rewrite a scene, watch the GUI's Story Map update live.
+
+### Run
+
+```bash
+pip install -e ".[gui]"
+
+# production: serves the built frontend from the same Python process
+gui/run.sh /path/to/your/renpy/project /path/to/renpy-sdk
+
+# dev: hot-reload backend + Vite dev server
+gui/dev.sh /path/to/your/renpy/project /path/to/renpy-sdk
+```
+
+`run.sh` builds the frontend on first run if `gui/frontend/dist/` is missing.
+After startup it opens `http://127.0.0.1:8765/` in your browser.
+
+### Architecture
+
+- **Backend** (`gui/backend/`) — FastAPI process that spawns a `renpy-mcp`
+  subprocess at startup, exposes REST + WebSocket endpoints to the browser,
+  and watches the project's `game/` tree for filesystem changes (so external
+  edits — from your LLM, from `git pull`, from a text editor — push live to
+  the UI).
+- **Frontend** (`gui/frontend/`) — Vite + React + TypeScript + TailwindCSS,
+  with ReactFlow for the Story Map graph. Three working panels (Story Map,
+  Characters, Assets) and stubs for Variables, Animations, Mini-Games,
+  Music, Build.
+- **No chat panel.** Agent interaction happens in your existing LLM harness
+  pointed at the same `renpy-mcp` server. The GUI is one MCP client among
+  many; the file system is the integration point.
