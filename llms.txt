@@ -1,0 +1,54 @@
+# renpy-mcp
+
+> MCP server exposing Ren'Py visual novel development as a tiered set of structured tools, plus a browser-based VN editor (RPBuilder GUI) that uses the same MCP server. Designed for agent harnesses (Claude Code, hermes-agent, Cursor) to author VNs without ever touching a `.rpy` file directly.
+
+Every mutation routes through a single guarded write pipeline (`apply_write`) — path containment, label uniqueness, 4-space indent normalization, atomic write, `.rpyc` cleanup, and a returned unified diff apply uniformly across all tiers. The GUI is one MCP client among many; the file system is the integration point, so an LLM harness and the GUI can operate on the same project in parallel without coordinating.
+
+## Start here
+
+- [README.md](README.md): install, wire-in to Claude Code / hermes-agent / GUI, feature list
+- [DESIGN.md](DESIGN.md): architecture deep-dive, tier model rationale, writer pipeline, how to add a tool / panel / tier, testing patterns, non-goals
+
+## Source map
+
+- [src/renpy_mcp/](src/renpy_mcp/): the MCP server itself
+  - [tools/tier1_read.py](src/renpy_mcp/tools/tier1_read.py): 12 read-only introspection tools + `get_lint_report`
+  - [tools/tier2_write.py](src/renpy_mcp/tools/tier2_write.py): 15 guarded write primitives (one statement per tool)
+  - [tools/tier3_intents.py](src/renpy_mcp/tools/tier3_intents.py): 10 high-level intents (one creator action per tool)
+  - [tools/tier4_escape.py](src/renpy_mcp/tools/tier4_escape.py): 2 escape hatches — `apply_unified_diff`, `exec_python_in_init` (opt-in via `--tiers 1,2,3,4`)
+  - [tools/lifecycle.py](src/renpy_mcp/tools/lifecycle.py): `launch_preview` / `stop_preview` / `get_preview_status`
+  - [tools/_shared.py](src/renpy_mcp/tools/_shared.py): shared helpers (`ok`, `err`, `quote`, `find_single_label`, `insert_into_label_body`, `write_response`, `BODY_INDENT`)
+  - [tools/registry.py](src/renpy_mcp/tools/registry.py): single dispatch point across tiers
+  - [project/writer.py](src/renpy_mcp/project/writer.py): the guarded write pipeline every mutation routes through
+  - [project/scanner.py](src/renpy_mcp/project/scanner.py): project index — labels, characters, images, audio, screens, variables
+  - [guardrails/](src/renpy_mcp/guardrails/): indent normalization, reserved filenames, label uniqueness, dialogue escaping
+  - [server.py](src/renpy_mcp/server.py): MCP server + tier registration; extend this when adding a new tier
+  - [config.py](src/renpy_mcp/config.py): `ServerConfig` + `DEFAULT_TIERS`
+
+- [gui/](gui/): browser-based VN editor — single FastAPI process spawns `renpy-mcp` as a subprocess and serves a Vite/React SPA
+  - [gui/backend/src/renpy_mcp_gui/app.py](gui/backend/src/renpy_mcp_gui/app.py): REST per panel + WebSocket file-watcher fan-out; every endpoint is a thin wrapper around an MCP tool call
+  - [gui/backend/src/renpy_mcp_gui/mcp_client.py](gui/backend/src/renpy_mcp_gui/mcp_client.py): persistent stdio MCP client
+  - [gui/backend/src/renpy_mcp_gui/watcher.py](gui/backend/src/renpy_mcp_gui/watcher.py): watchdog observer; pushes `FileEvent`s to connected WebSocket clients
+  - [gui/frontend/src/panels/](gui/frontend/src/panels/): one component per left-rail item (Story Map, Characters, Assets, Variables, Build, Mini-Games, Music, SceneInspector)
+  - [gui/frontend/src/api/client.ts](gui/frontend/src/api/client.ts): fetch wrapper; use `api<T>("/api/...", {json, method})` for every call
+  - [gui/frontend/src/api/types.ts](gui/frontend/src/api/types.ts): shared frontend types that mirror MCP tool responses
+
+- [tests/](tests/): pytest suite, 123 tests, ~9s full run
+  - [tests/conftest.py](tests/conftest.py): `FIXTURE_ROOT`, `SDK_ROOT`, `parse()` helper, default `config` / `registry` fixtures
+  - [tests/test_tier1.py](tests/test_tier1.py) / [test_tier2.py](tests/test_tier2.py) / [test_tier3.py](tests/test_tier3.py) / [test_tier4.py](tests/test_tier4.py): per-tier unit tests
+  - [tests/test_gui_backend.py](tests/test_gui_backend.py): FastAPI TestClient; module-skipped when `RENPY_SDK` is not present
+  - [tests/fixtures/tiny_project/](tests/fixtures/tiny_project/): the canonical fixture VN; each mutation test copies it into `tmp_path`
+
+## Configuration + wiring
+
+- [.mcp.example.json](.mcp.example.json): drop-in Claude Code config starter
+- [pyproject.toml](pyproject.toml): package config; `[dev]` extra adds pytest/ruff; `[gui]` extra adds fastapi/uvicorn/watchdog/httpx
+- [scripts/smoke_test.py](scripts/smoke_test.py): minimal end-to-end sanity probe (starts the server, calls `get_project_overview`, exits)
+
+## Conventions the codebase expects
+
+- **Tool naming:** `snake_case`; action-first for writes (`add_say`), noun-first for reads (`list_labels`); no `renpy_` prefix (harness already namespaces); <=25 chars where possible.
+- **Every write tool** returns a unified diff in its response and routes through `apply_write` in [project/writer.py](src/renpy_mcp/project/writer.py).
+- **Pydantic models in the GUI backend are module-scope** — closure-scoped models break Pydantic v2 forward refs.
+- **Frontend panels use TanStack Query** for server state; [panels/Variables.tsx](gui/frontend/src/panels/Variables.tsx) is the cleanest recent template.
+- **Tests for write tools** copy the fixture into `tmp_path` via `shutil.copytree(FIXTURE_ROOT, tmp_path / "tiny_project")` so the canonical fixture stays clean.
