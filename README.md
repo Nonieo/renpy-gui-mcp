@@ -53,25 +53,35 @@ Click a target to jump back to its label in the Story Map.
 
 ![Choice View](docs/screenshots/03_choice_view.png)
 
-**Composers** — visual generators for screens, multi-sprite stages,
-imagemaps, and menus. Each composer takes a typed JSON tree and
-appends one Ren'Py construct via the matching Tier 3 tool; agents
-call the same tools directly.
+**Library** — one tabbed surface for the project's reusable pieces:
+Characters (cast cards with display name + accent colour), Assets
+(backgrounds, sprites, audio), Variables (default values), Screens
+(screen blocks + imagemaps), and Mini-Games (screen scaffolds). Each
+tab edits via the matching Tier 3 tool; agents call the same tools
+directly.
 
-![Composers panel](docs/screenshots/04_composers.png)
+![Library panel](docs/screenshots/04_library_tabs.png)
 
-**Languages** — per-language translation coverage from
+**Localization** — per-language translation coverage from
 `game/tl/<lang>/`. Click a row to load its stale-string list; the
 "+ Scaffold" button runs `renpy.sh translate` to bootstrap a new
 language.
 
-![Languages panel](docs/screenshots/05_languages.png)
+![Localization panel](docs/screenshots/05_localization.png)
 
 **Themed shell** — three surface themes (light / cream / dark), six
 accent presets, sidebar variants (icon / labeled / palette). Every
 preference persists in `localStorage`.
 
 ![Preferences modal](docs/screenshots/06_preferences.png)
+
+**Ambient header** — the top strip surfaces project state without
+demanding attention: a watcher pill (last edited file, freshness), a
+Recent disclosure (the last N edits with jump-to-source), and a Lint
+badge that runs `renpy.sh lint` in the background and pops findings
+inline.
+
+![Header lint and recent disclosure](docs/screenshots/07_header_lint_recent.png)
 
 > **LLM agents and fresh contributors:** start with [llms.txt](llms.txt) for
 > an indexed source map, then [DESIGN.md](DESIGN.md) for the architecture,
