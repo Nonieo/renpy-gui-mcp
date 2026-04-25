@@ -171,11 +171,15 @@ function DistributeSection() {
     linux: true,
   });
   const [running, setRunning] = useState(false);
+  const [destination, setDestination] = useState("");
   const [report, setReport] = useState<{
     targets: string[];
     returncode: number;
     stdout: string;
     stderr: string;
+    artifacts?: string[];
+    destination?: string | null;
+    default_destination?: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -199,16 +203,18 @@ function DistributeSection() {
     setError(null);
     setReport(null);
     try {
+      const body: Record<string, unknown> = { targets: selected };
+      if (destination.trim()) body.destination = destination.trim();
       const data = await api<{
         targets?: string[];
         returncode?: number;
         stdout?: string;
         stderr?: string;
+        artifacts?: string[];
+        destination?: string | null;
+        default_destination?: string;
         error?: string;
-      }>("/api/build/distribute", {
-        method: "POST",
-        json: { targets: selected },
-      });
+      }>("/api/build/distribute", { method: "POST", json: body });
       if (data.error) {
         setError(data.error);
       } else {
@@ -217,6 +223,9 @@ function DistributeSection() {
           returncode: data.returncode ?? -1,
           stdout: data.stdout ?? "",
           stderr: data.stderr ?? "",
+          artifacts: data.artifacts ?? [],
+          destination: data.destination ?? null,
+          default_destination: data.default_destination,
         });
       }
     } catch (err) {
@@ -267,12 +276,28 @@ function DistributeSection() {
         })}
       </div>
 
+      <label className="block mb-3">
+        <span className="text-xs text-zinc-500 mb-1 inline-block">
+          Output directory <span className="text-zinc-400">(optional)</span>
+        </span>
+        <input
+          type="text"
+          value={destination}
+          onChange={(e) => setDestination(e.target.value)}
+          placeholder="leave empty to put artifacts next to the project folder"
+          className="w-full px-2 py-1.5 border border-zinc-200 rounded text-xs font-mono bg-white text-zinc-800"
+        />
+        <span className="text-[10px] font-mono text-zinc-400 mt-1 inline-block">
+          Default: <code>&lt;project_parent&gt;/&lt;name&gt;-&lt;version&gt;-dists/</code>
+        </span>
+      </label>
+
       <p className="text-xs text-zinc-500 mb-3">
         {selected.length === 0
           ? "Select at least one target."
-          : `${selected.length} target${selected.length === 1 ? "" : "s"} → renpy.sh distribute --packages=${selected.join(
-              ",",
-            )}`}
+          : `${selected.length} target${selected.length === 1 ? "" : "s"} → renpy.sh distribute ${selected
+              .map((t) => `--package ${t}`)
+              .join(" ")}${destination.trim() ? ` --destination ${destination.trim()}` : ""}`}
       </p>
 
       {error && (
@@ -282,22 +307,60 @@ function DistributeSection() {
       )}
 
       {report && (
-        <div className="border border-zinc-200 rounded text-xs overflow-hidden">
-          <header className="px-3 py-1.5 bg-zinc-50 border-b border-zinc-200 flex items-center justify-between font-mono text-zinc-500">
-            <span>
-              exit code: {report.returncode} ·{" "}
-              {report.targets.join(", ") || "(no targets)"}
-            </span>
-          </header>
-          <pre className="bg-zinc-900 text-zinc-100 font-mono p-3 overflow-auto max-h-72 leading-relaxed">
-            {report.stdout || "(empty stdout)"}
-            {report.stderr && (
-              <>
-                {"\n--- stderr ---\n"}
-                {report.stderr}
-              </>
-            )}
-          </pre>
+        <div className="space-y-3">
+          {report.artifacts && report.artifacts.length > 0 && (
+            <div className="border border-emerald-200 bg-emerald-50 rounded p-3 text-xs">
+              <div className="flex items-baseline justify-between mb-1.5">
+                <strong className="text-emerald-800">
+                  {report.artifacts.length} artifact
+                  {report.artifacts.length === 1 ? "" : "s"} produced
+                </strong>
+                {report.destination ? (
+                  <span className="font-mono text-emerald-700">
+                    in <code>{report.destination}</code>
+                  </span>
+                ) : (
+                  <span className="font-mono text-emerald-700">
+                    next to the project folder
+                  </span>
+                )}
+              </div>
+              <ul className="space-y-0.5">
+                {report.artifacts.map((path) => {
+                  const filename = path.split("/").pop() ?? path;
+                  return (
+                    <li key={path} className="font-mono text-emerald-700">
+                      <span className="text-emerald-500">▸</span> {filename}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+          {report.artifacts && report.artifacts.length === 0 && report.returncode === 0 && (
+            <div className="border border-amber-200 bg-amber-50 rounded p-3 text-xs text-amber-800">
+              renpy.sh exited 0 but no artifacts were found. Check the build
+              log below — the package name(s) may not be defined in this
+              project's <code>options.rpy</code>.
+            </div>
+          )}
+          <div className="border border-zinc-200 rounded text-xs overflow-hidden">
+            <header className="px-3 py-1.5 bg-zinc-50 border-b border-zinc-200 flex items-center justify-between font-mono text-zinc-500">
+              <span>
+                exit code: {report.returncode} ·{" "}
+                {report.targets.join(", ") || "(no targets)"}
+              </span>
+            </header>
+            <pre className="bg-zinc-900 text-zinc-100 font-mono p-3 overflow-auto max-h-72 leading-relaxed">
+              {report.stdout || "(empty stdout)"}
+              {report.stderr && (
+                <>
+                  {"\n--- stderr ---\n"}
+                  {report.stderr}
+                </>
+              )}
+            </pre>
+          </div>
         </div>
       )}
     </section>

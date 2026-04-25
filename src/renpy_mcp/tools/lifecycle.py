@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import signal
+from pathlib import Path
 from typing import Any
 
 import mcp.types as types
@@ -542,7 +543,16 @@ def _build_distribution(config: ServerConfig) -> ToolDef:
                 "items": {"type": "string"},
                 "description": (
                     "Distribution targets (e.g. `[\"pc\", \"mac\", \"linux\"]`). "
-                    "Passed verbatim to `--packages=`."
+                    "Each becomes a separate `--package <name>` flag."
+                ),
+            },
+            "destination": {
+                "type": "string",
+                "description": (
+                    "Optional output directory for the built artifacts. "
+                    "When omitted, Ren'Py defaults to "
+                    "`<project_parent>/<name>-<version>-dists/`. "
+                    "When given, the path is created if it doesn't exist."
                 ),
             },
         },
@@ -562,15 +572,44 @@ def _build_distribution(config: ServerConfig) -> ToolDef:
                     "rejected to keep `--package=` shell-safe"
                 )
             cleaned.append(t)
+
         # Ren'Py's distribute command is implemented IN THE LAUNCHER, not in
         # core. The argv shape is `renpy.sh <launcher_dir> distribute
-        # <project_dir> [--package X --package Y]`. Each --package is a
-        # separate, repeated flag — there is no `--packages=X,Y` form. The
-        # launcher dir lives at `<sdk_root>/launcher`.
+        # <project_dir> [--package X --package Y] [--destination=<path>]`.
         launcher_dir = config.sdk_root / "launcher"
-        package_args: list[str] = []
+        extra_args: list[str] = []
         for t in cleaned:
-            package_args.extend(["--package", t])
+            extra_args.extend(["--package", t])
+
+        # Resolve and validate the destination. Default behavior (no
+        # `--destination`) lands artifacts at
+        # `<project_parent>/<name>-<version>-dists/` — already "next to
+        # the source folder." Caller can override.
+        destination_arg: str | None = arguments.get("destination")
+        resolved_dest: Path | None = None
+        if destination_arg is not None:
+            if not isinstance(destination_arg, str) or not destination_arg.strip():
+                return _err("destination must be a non-empty path string")
+            resolved_dest = Path(destination_arg).expanduser().resolve()
+            try:
+                resolved_dest.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                return _err(f"could not create destination `{resolved_dest}`: {exc}")
+            extra_args.extend(["--destination", str(resolved_dest)])
+
+        # Snapshot existing artifact filenames before the build so we can
+        # tell what THIS run produced vs leftover from prior builds.
+        snapshot_root = (
+            resolved_dest
+            if resolved_dest is not None
+            else config.project_root.parent
+        )
+        before: set[Path] = set()
+        if snapshot_root.is_dir():
+            for p in snapshot_root.rglob("*"):
+                if p.is_file() and p.suffix.lower() in (".zip", ".bz2"):
+                    before.add(p.resolve())
+
         try:
             # `distribute` can take a while on large projects; allow up to 10
             # minutes. Same shape as `run_lint` but with a longer ceiling.
@@ -579,14 +618,33 @@ def _build_distribution(config: ServerConfig) -> ToolDef:
                 launcher_dir,
                 "distribute",
                 str(config.project_root),
-                *package_args,
+                *extra_args,
                 timeout=600.0,
             )
         except Exception as exc:  # noqa: BLE001
             return _err(f"failed to invoke renpy.sh distribute: {exc}")
+
+        # Diff against the pre-build snapshot — only surface paths that
+        # are NEW since the build started. Avoids reporting stale
+        # artifacts left behind by previous runs.
+        artifacts: list[str] = []
+        if snapshot_root.is_dir():
+            for p in snapshot_root.rglob("*"):
+                if not p.is_file() or p.suffix.lower() not in (".zip", ".bz2"):
+                    continue
+                resolved_path = p.resolve()
+                if resolved_path in before:
+                    continue
+                artifacts.append(str(resolved_path))
+
         return _ok(
             {
                 "targets": cleaned,
+                "destination": str(resolved_dest) if resolved_dest else None,
+                "default_destination": str(
+                    config.project_root.parent.resolve()
+                ),
+                "artifacts": sorted(artifacts),
                 "returncode": result.returncode,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
@@ -596,11 +654,13 @@ def _build_distribution(config: ServerConfig) -> ToolDef:
     return ToolDef(
         name="build_distribution",
         description=(
-            "Wrap `renpy.sh <project> distribute --packages=<targets>` to "
-            "produce platform-specific build artifacts under the project's "
-            "`build/` directory. `targets` is a list of Ren'Py package names "
-            "(`pc`, `mac`, `linux`, `web`, `steam`, etc.). Slow — can take "
-            "minutes on large projects. SDK-gated."
+            "Wrap Ren'Py's `distribute` command to produce platform-specific "
+            "build artifacts. `targets` is a list of Ren'Py package names "
+            "(`pc`, `mac`, `linux`, `web`, `steam`, etc.). Optional "
+            "`destination` overrides where the artifacts land — defaults to "
+            "`<project_parent>/<name>-<version>-dists/` (next to the source "
+            "folder). Returns the list of artifact paths produced. Slow — "
+            "can take minutes on large projects. SDK-gated."
         ),
         input_schema=schema,
         handler=handler,

@@ -241,3 +241,71 @@ async def test_build_distribution_rejects_unsafe_target(workspace):
     _, reg, _ = workspace
     out = parse(await reg.call("build_distribution", {"targets": ["pc; rm -rf /"]}))
     assert "error" in out
+
+
+async def test_build_distribution_with_destination(workspace, monkeypatch, tmp_path):
+    """When `destination` is given, --destination is forwarded and the
+    folder is created if missing."""
+    _, reg, _ = workspace
+    captured: dict = {}
+
+    async def fake_run(sdk_root, basedir, *args, timeout=120.0):
+        captured["args"] = args
+        from renpy_mcp.sdk import SDKResult
+        return SDKResult(returncode=0, stdout="built", stderr="")
+
+    monkeypatch.setattr("renpy_mcp.tools.lifecycle.renpy_sdk.run", fake_run)
+
+    custom_dest = tmp_path / "custom_output"
+    assert not custom_dest.is_dir()
+    out = parse(
+        await reg.call(
+            "build_distribution",
+            {"targets": ["pc"], "destination": str(custom_dest)},
+        )
+    )
+    assert out["returncode"] == 0
+    # Folder is auto-created.
+    assert custom_dest.is_dir()
+    # `--destination` is forwarded as `--destination <abs path>`.
+    args = captured["args"]
+    assert "--destination" in args
+    dest_idx = list(args).index("--destination")
+    assert args[dest_idx + 1] == str(custom_dest.resolve())
+    # Response surfaces both the resolved override and the default fallback.
+    assert out["destination"] == str(custom_dest.resolve())
+    assert out["default_destination"]
+
+
+async def test_build_distribution_response_includes_artifacts(workspace, monkeypatch, tmp_path):
+    """When the run produces artifacts in the destination, they're listed."""
+    cfg, reg, _ = workspace
+    custom_dest = tmp_path / "out"
+    custom_dest.mkdir()
+
+    async def fake_run(sdk_root, basedir, *args, timeout=120.0):
+        # Simulate Ren'Py dropping a real-looking artifact in the dest.
+        (custom_dest / "test_vn-1.0-pc.zip").write_bytes(b"fake zip\n")
+        from renpy_mcp.sdk import SDKResult
+        return SDKResult(returncode=0, stdout="built", stderr="")
+
+    monkeypatch.setattr("renpy_mcp.tools.lifecycle.renpy_sdk.run", fake_run)
+    out = parse(
+        await reg.call(
+            "build_distribution",
+            {"targets": ["pc"], "destination": str(custom_dest)},
+        )
+    )
+    assert any("test_vn-1.0-pc.zip" in a for a in out["artifacts"])
+
+
+async def test_build_distribution_rejects_empty_destination(workspace):
+    _, reg, _ = workspace
+    out = parse(
+        await reg.call(
+            "build_distribution",
+            {"targets": ["pc"], "destination": "   "},
+        )
+    )
+    assert "error" in out
+    assert "destination" in out["error"]

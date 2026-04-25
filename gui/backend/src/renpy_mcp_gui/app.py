@@ -136,6 +136,7 @@ class AddFlashBody(BaseModel):
 
 class BuildDistributeBody(BaseModel):
     targets: list[str]
+    destination: str | None = None
 
 
 class ScreenLayoutBody(BaseModel):
@@ -417,7 +418,10 @@ def build_app(project_root: Path, sdk_root: Path, static_dir: Path | None = None
 
     @app.post("/api/build/distribute")
     async def build_distribute(body: BuildDistributeBody = Body(...)) -> Any:
-        return await state.client.call("build_distribution", {"targets": body.targets})
+        args: dict[str, Any] = {"targets": body.targets}
+        if body.destination is not None:
+            args["destination"] = body.destination
+        return await state.client.call("build_distribution", args)
 
     # ---------- composers (Phase 7) ----------
 
