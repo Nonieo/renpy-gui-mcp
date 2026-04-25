@@ -54,7 +54,7 @@ export function Composers() {
   );
 }
 
-function ScreenLayoutComposer() {
+export function ScreenLayoutComposer() {
   const [name, setName] = useState("");
   const [file, setFile] = useState("");
   const [tree, setTree] = useState(SCREEN_LAYOUT_STARTER);
@@ -196,7 +196,7 @@ interface SpriteRow {
 
 const EMPTY_SPRITE: SpriteRow = { tag: "", expression: "", position: "" };
 
-function StageComposer() {
+export function StageComposer() {
   const [label, setLabel] = useState("");
   const [background, setBackground] = useState("");
   const [transition, setTransition] = useState("");
@@ -361,7 +361,7 @@ interface HotspotRow {
 
 const EMPTY_HOTSPOT: HotspotRow = { x: "0", y: "0", w: "100", h: "50", action: "" };
 
-function ImageMapComposer() {
+export function ImageMapComposer() {
   const [name, setName] = useState("");
   const [ground, setGround] = useState("");
   const [hover, setHover] = useState("");
@@ -534,7 +534,7 @@ interface ChoiceRow {
 
 const EMPTY_CHOICE: ChoiceRow = { text: "", condition: "", body: "pass" };
 
-function MenuComposer() {
+export function MenuComposer() {
   const [label, setLabel] = useState("");
   const [choices, setChoices] = useState<ChoiceRow[]>([{ ...EMPTY_CHOICE }]);
   const [error, setError] = useState<string | null>(null);

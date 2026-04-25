@@ -1,31 +1,13 @@
 import { clsx } from "clsx";
 import {
   GitBranch,
-  Split,
-  Users,
-  Image,
-  Database,
-  Film,
-  Gamepad2,
-  Music,
+  BookOpen,
   Languages as LanguagesIcon,
-  Wand2,
-  Hammer,
+  Ship as ShipIcon,
 } from "lucide-react";
 import type { Rail } from "@/lib/usePrefs";
 
-export type PanelId =
-  | "story"
-  | "choice"
-  | "characters"
-  | "assets"
-  | "variables"
-  | "animations"
-  | "minigames"
-  | "music"
-  | "languages"
-  | "composers"
-  | "build";
+export type PanelId = "story" | "library" | "localization" | "ship";
 
 interface PanelMeta {
   id: PanelId;
@@ -35,17 +17,10 @@ interface PanelMeta {
 }
 
 const ITEMS: PanelMeta[] = [
-  { id: "story", label: "Story Map", hint: "branching graph", icon: GitBranch },
-  { id: "choice", label: "Choice View", hint: "player perspective", icon: Split },
-  { id: "characters", label: "Characters", hint: "cast & display names", icon: Users },
-  { id: "assets", label: "Assets", hint: "bg · sprites · audio", icon: Image },
-  { id: "variables", label: "Variables", hint: "default values", icon: Database },
-  { id: "animations", label: "Animations", hint: "ATL stub", icon: Film },
-  { id: "minigames", label: "Mini-Games", hint: "screen scaffolds", icon: Gamepad2 },
-  { id: "music", label: "Music", hint: "per-scene scoring", icon: Music },
-  { id: "languages", label: "Languages", hint: "translation coverage", icon: LanguagesIcon },
-  { id: "composers", label: "Composers", hint: "visual generators", icon: Wand2 },
-  { id: "build", label: "Build", hint: "lint & distribute", icon: Hammer },
+  { id: "story", label: "Story", hint: "map · choice", icon: GitBranch },
+  { id: "library", label: "Library", hint: "characters · assets · screens", icon: BookOpen },
+  { id: "localization", label: "Localization", hint: "translation coverage", icon: LanguagesIcon },
+  { id: "ship", label: "Ship", hint: "distribute", icon: ShipIcon },
 ];
 
 export function Sidebar({

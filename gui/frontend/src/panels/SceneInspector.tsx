@@ -25,7 +25,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ChevronRight,
+  GitBranch,
   Image,
+  Layers,
   MessageSquare,
   Music,
   Plus,
@@ -35,6 +37,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { StageComposer, MenuComposer } from "@/panels/Composers";
 import { api } from "@/api/client";
 import type {
   CharacterInfo,
@@ -493,6 +496,8 @@ const INSERT_OPTIONS = [
   { id: "show", label: "Show / move character", icon: Image },
   { id: "with", label: "With effect", icon: Wand2 },
   { id: "flash", label: "Color flash", icon: Zap },
+  { id: "stage", label: "Stage (multi-sprite)", icon: Layers },
+  { id: "menu", label: "Menu / choices", icon: GitBranch },
 ] as const;
 
 type InsertId = (typeof INSERT_OPTIONS)[number]["id"];
@@ -514,6 +519,8 @@ function InsertEvent({ labelName }: { labelName: string }) {
     return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
+  const composerKind = active === "stage" || active === "menu" ? active : null;
+
   return (
     <div className="border-t border-line pt-3 mt-3 relative">
       <button
@@ -524,7 +531,7 @@ function InsertEvent({ labelName }: { labelName: string }) {
         <Plus className="w-3 h-3" />
         Insert event
       </button>
-      {open && (
+      {open && !composerKind && (
         <div
           ref={popupRef}
           className="absolute left-0 right-0 mt-1 bg-card border border-line rounded shadow-lg z-10 overflow-hidden"
@@ -556,6 +563,51 @@ function InsertEvent({ labelName }: { labelName: string }) {
           )}
         </div>
       )}
+      {composerKind && (
+        <ComposerOverlay
+          kind={composerKind}
+          onClose={() => {
+            setOpen(false);
+            setActive(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ComposerOverlay({
+  kind,
+  onClose,
+}: {
+  kind: "stage" | "menu";
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 z-50 flex items-start justify-center pt-12 px-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-canvas border border-line rounded-lg shadow-xl max-w-3xl w-full max-h-[85vh] overflow-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-4 py-2 border-b border-line flex items-center justify-between bg-card">
+          <span className="text-xs text-ink3 font-mono">
+            {kind === "stage" ? "Stage Composer" : "Menu Composer"}
+          </span>
+          <button
+            onClick={onClose}
+            className="text-xs text-ink3 hover:text-ink"
+            aria-label="Close composer"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="p-4">
+          {kind === "stage" ? <StageComposer /> : <MenuComposer />}
+        </div>
+      </div>
     </div>
   );
 }

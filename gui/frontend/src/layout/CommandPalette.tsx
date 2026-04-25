@@ -3,16 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import {
   GitBranch,
-  Split,
-  Users,
-  Image,
-  Database,
-  Film,
-  Gamepad2,
-  Music,
+  BookOpen,
   Languages as LanguagesIcon,
-  Wand2,
-  Hammer,
+  Ship as ShipIcon,
   FileText,
 } from "lucide-react";
 import { api } from "@/api/client";
@@ -36,17 +29,10 @@ interface LabelEntry {
 type Entry = PanelEntry | LabelEntry;
 
 const PANEL_ENTRIES: PanelEntry[] = [
-  { kind: "panel", id: "story", label: "Story Map", hint: "branching graph", icon: GitBranch },
-  { kind: "panel", id: "choice", label: "Choice View", hint: "player perspective", icon: Split },
-  { kind: "panel", id: "characters", label: "Characters", hint: "cast & display names", icon: Users },
-  { kind: "panel", id: "assets", label: "Assets", hint: "bg · sprites · audio", icon: Image },
-  { kind: "panel", id: "variables", label: "Variables", hint: "default values", icon: Database },
-  { kind: "panel", id: "animations", label: "Animations", hint: "ATL stub", icon: Film },
-  { kind: "panel", id: "minigames", label: "Mini-Games", hint: "screen scaffolds", icon: Gamepad2 },
-  { kind: "panel", id: "music", label: "Music", hint: "per-scene scoring", icon: Music },
-  { kind: "panel", id: "languages", label: "Languages", hint: "translation coverage", icon: LanguagesIcon },
-  { kind: "panel", id: "composers", label: "Composers", hint: "visual generators", icon: Wand2 },
-  { kind: "panel", id: "build", label: "Build", hint: "lint & distribute", icon: Hammer },
+  { kind: "panel", id: "story", label: "Story", hint: "map · choice", icon: GitBranch },
+  { kind: "panel", id: "library", label: "Library", hint: "characters · assets · screens", icon: BookOpen },
+  { kind: "panel", id: "localization", label: "Localization", hint: "translation coverage", icon: LanguagesIcon },
+  { kind: "panel", id: "ship", label: "Ship", hint: "distribute", icon: ShipIcon },
 ];
 
 export function CommandPalette({

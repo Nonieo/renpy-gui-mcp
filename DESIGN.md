@@ -361,8 +361,10 @@ spawn `sleep 30` instead of the real SDK, for example.
 
 - **Animations panel in the GUI.** Ren'Py's ATL is procedural enough
   that a multi-track timeline misrepresents how animations are actually
-  authored. The panel stays a deliberate stub with a note explaining
-  why.
+  authored. The stub panel that previously held a "deliberate stub"
+  placeholder was removed in the Phase 2 panel collapse — it is gone,
+  not hidden behind a feature flag. ATL authoring stays in the source
+  files until someone proposes a UI shape that actually fits ATL.
 - **Chat panel inside the GUI.** See §1 and §8 — the integration point
   is the file system; adding in-GUI chat creates a second axis and
   breaks the single-integration-point model.
