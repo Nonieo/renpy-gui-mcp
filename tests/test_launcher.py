@@ -181,3 +181,28 @@ def test_fetch_latest_sdk_version_raises_on_missing(monkeypatch):
     monkeypatch.setattr(L.urllib.request, "urlopen", lambda *a, **k: FakeResp())
     with pytest.raises(RuntimeError, match="could not find"):
         L.fetch_latest_sdk_version()
+
+
+# ---------- frontend-dist resolution -----------------------------------------
+
+
+def test_find_frontend_dist_in_a_real_checkout():
+    """When run from a checkout, the launcher should find gui/frontend/dist
+    if it's been built. We don't assert it's None when missing because the
+    tester may have built the frontend; we DO assert that, when found, the
+    path actually exists and has an index.html.
+    """
+    found = L.find_frontend_dist()
+    if found is None:
+        pytest.skip("frontend not built — `cd gui/frontend && npm run build` to enable this test")
+    assert found.is_dir()
+    assert (found / "index.html").is_file()
+
+
+def test_find_frontend_dist_returns_none_when_missing(monkeypatch, tmp_path):
+    """Stub Path(__file__) to a tree without a frontend/dist."""
+    fake_module = tmp_path / "gui" / "backend" / "src" / "renpy_mcp_gui" / "launcher.py"
+    fake_module.parent.mkdir(parents=True)
+    fake_module.write_text("# stub\n")
+    monkeypatch.setattr(L, "__file__", str(fake_module))
+    assert L.find_frontend_dist() is None

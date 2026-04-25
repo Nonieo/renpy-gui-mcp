@@ -376,9 +376,49 @@ def download_sdk_interactively(*, default_target: Path | None = None) -> str | N
 # ---------- handoff to the GUI server ----------------------------------------
 
 
+def find_frontend_dist() -> Path | None:
+    """Locate the built editor frontend, if any.
+
+    The built SPA lives at `gui/frontend/dist/` in a repo checkout. We
+    walk up from this module's path because the launcher ships inside
+    the same repo. When no `dist/index.html` exists the editor server
+    runs API-only and any browser visit returns JSON instead of the
+    editor — which is what the original "I see JSON" bug looked like.
+    """
+    # launcher.py path: gui/backend/src/renpy_mcp_gui/launcher.py
+    # parents[3]                                      ↑   ↑   ↑
+    #                                              gui/
+    candidate = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+    if (candidate / "index.html").is_file():
+        return candidate
+    return None
+
+
 def spawn_gui(sdk: str, project: str) -> int:
     """Replace the launcher process with the GUI server."""
     args = ["--project", project, "--sdk", sdk]
+    dist = find_frontend_dist()
+    if dist is not None:
+        args.extend(["--static-dir", str(dist)])
+    else:
+        # Without --static-dir the FastAPI app only serves /api/* and
+        # /ws — the browser sees raw JSON. Tell the user how to fix
+        # it; we still spawn the server so they can verify their MCP
+        # tooling works, but the editor UI won't render until they
+        # build the frontend.
+        print(
+            "\n  ⚠  no built frontend found at gui/frontend/dist —",
+            file=sys.stderr,
+        )
+        print(
+            "     the server will run but the browser will see JSON, not the editor.",
+            file=sys.stderr,
+        )
+        print(
+            "     fix: cd gui/frontend && npm install && npm run build",
+            file=sys.stderr,
+        )
+
     candidates = [
         ["renpy-mcp-gui", *args],
         [sys.executable, "-m", "renpy_mcp_gui", *args],
