@@ -22,3 +22,17 @@ gui/frontend/node_modules/
 gui/frontend/dist/
 gui/frontend/.vite/
 gui/frontend/*.tsbuildinfo
+
+# Editor-metadata sidecars written by `set_canvas_positions` and
+# `set_ignored_diagnostics`. Per-author state, not source.
+.renpy-mcp/
+
+# Ren'Py distribute output. Lands at `<project>/../<name>-<version>-dists/`;
+# keep it out of the repo if anyone runs distribute against a project
+# whose parent happens to be the repo root.
+*-dists/
+
+# Local secrets, in case anyone drops a .env into this dir. The MCP
+# server doesn't read .env itself; this is defense in depth.
+.env
+.env.local

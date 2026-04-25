@@ -15,6 +15,10 @@ the repo is reference material for humans.
   (hermes ships a fal image tool; Claude Code's harness decides what it
   has). Save those files into `<project>/game/images/` or
   `<project>/game/audio/`, then register them through the MCP server.
+  **Before generating, read [MEDIA.md](MEDIA.md)** — it captures every
+  format / dimension / filename rule that makes assets drop in without
+  rework, plus VN-shaped style and tone direction that's
+  provider-agnostic.
 
 ## Default folder
 
