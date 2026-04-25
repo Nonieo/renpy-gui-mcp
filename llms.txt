@@ -9,6 +9,7 @@ Every mutation routes through a single guarded write pipeline (`apply_write`) �
 - [AGENTS.md](AGENTS.md): one-page playbook for LLMs driving this server — one-sentence prompt → `new_project` → story → host asset tools → `add_image_alias` → `get_lint_report` → `launch_preview`
 - [README.md](README.md): install, wire-in to Claude Code / hermes-agent / GUI, feature list
 - [DESIGN.md](DESIGN.md): architecture deep-dive, tier model rationale, writer pipeline, how to add a tool / panel / tier, testing patterns, non-goals
+- [ROADMAP.md](ROADMAP.md): forward-looking IDE direction — diagnostics-as-tools, warp + drafting, three canvases, composers, watcher polish; sequenced by agent-loop value vs cost
 
 ## Source map
 

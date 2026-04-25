@@ -361,7 +361,8 @@ spawn `sleep 30` instead of the real SDK, for example.
 ## 11. Extension ideas (for a future session or contributor)
 
 These are recorded in approximate priority order. None are blocked on
-anything but capacity.
+anything but capacity. For larger directional bets (IDE-shaped features
+informed by Vangard / Ren'IDE), see [ROADMAP.md](ROADMAP.md).
 
 - **`build_distribution` MCP tool + Export button** — wraps
   `renpy.sh distribute`; unblocks the Build panel's Export tile.
