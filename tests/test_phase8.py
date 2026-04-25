@@ -309,3 +309,65 @@ async def test_build_distribution_rejects_empty_destination(workspace):
     )
     assert "error" in out
     assert "destination" in out["error"]
+
+
+async def test_build_distribution_reports_overwritten_artifacts(workspace, monkeypatch, tmp_path):
+    """Re-running a build at the same destination overwrites the previous
+    artifact. The response must still surface the new file — path-identity
+    diffs would silently drop it."""
+    import os, time as _time
+
+    _, reg, _ = workspace
+    custom_dest = tmp_path / "out"
+    custom_dest.mkdir()
+    stale = custom_dest / "test_vn-1.0-pc.zip"
+    # Pre-existing artifact from an imaginary earlier build; force its
+    # mtime well into the past so we know it's "old".
+    stale.write_bytes(b"old build\n")
+    old_time = _time.time() - 3600  # one hour ago
+    os.utime(stale, (old_time, old_time))
+
+    async def fake_run(sdk_root, basedir, *args, timeout=120.0):
+        # Simulate Ren'Py overwriting the same path.
+        stale.write_bytes(b"newer build\n")
+        from renpy_mcp.sdk import SDKResult
+        return SDKResult(returncode=0, stdout="rebuilt", stderr="")
+
+    monkeypatch.setattr("renpy_mcp.tools.lifecycle.renpy_sdk.run", fake_run)
+    out = parse(
+        await reg.call(
+            "build_distribution",
+            {"targets": ["pc"], "destination": str(custom_dest)},
+        )
+    )
+    # The artifact must appear even though its path existed before.
+    assert any("test_vn-1.0-pc.zip" in a for a in out["artifacts"]), out
+
+
+async def test_build_distribution_skips_unchanged_old_artifacts(workspace, monkeypatch, tmp_path):
+    """A stale .zip that this run DID NOT touch must not appear in
+    `artifacts`. Otherwise we'd lie to the user about what was built."""
+    import os, time as _time
+
+    _, reg, _ = workspace
+    custom_dest = tmp_path / "out"
+    custom_dest.mkdir()
+    untouched = custom_dest / "leftover-from-yesterday.zip"
+    untouched.write_bytes(b"truly old\n")
+    old_time = _time.time() - 86_400  # one day ago
+    os.utime(untouched, (old_time, old_time))
+
+    async def fake_run(sdk_root, basedir, *args, timeout=120.0):
+        # Build runs but produces nothing in custom_dest (e.g. wrong package
+        # name). The untouched stale file should NOT be reported.
+        from renpy_mcp.sdk import SDKResult
+        return SDKResult(returncode=0, stdout="ran", stderr="")
+
+    monkeypatch.setattr("renpy_mcp.tools.lifecycle.renpy_sdk.run", fake_run)
+    out = parse(
+        await reg.call(
+            "build_distribution",
+            {"targets": ["pc"], "destination": str(custom_dest)},
+        )
+    )
+    assert out["artifacts"] == []

@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import signal
+import time
 from pathlib import Path
 from typing import Any
 
@@ -597,18 +598,19 @@ def _build_distribution(config: ServerConfig) -> ToolDef:
                 return _err(f"could not create destination `{resolved_dest}`: {exc}")
             extra_args.extend(["--destination", str(resolved_dest)])
 
-        # Snapshot existing artifact filenames before the build so we can
-        # tell what THIS run produced vs leftover from prior builds.
+        # Record build-start time so we can recognize artifacts whose
+        # mtime advanced during this run. Path-identity snapshots fail
+        # the common case where Ren'Py OVERWRITES an existing artifact
+        # with the same filename — which is exactly what happens on
+        # repeat builds with no destination override.
         snapshot_root = (
             resolved_dest
             if resolved_dest is not None
             else config.project_root.parent
         )
-        before: set[Path] = set()
-        if snapshot_root.is_dir():
-            for p in snapshot_root.rglob("*"):
-                if p.is_file() and p.suffix.lower() in (".zip", ".bz2"):
-                    before.add(p.resolve())
+        # Subtract a 1 second tolerance so filesystems with second-level
+        # timestamp granularity don't lose the boundary.
+        build_started_at = time.time() - 1.0
 
         try:
             # `distribute` can take a while on large projects; allow up to 10
@@ -624,18 +626,19 @@ def _build_distribution(config: ServerConfig) -> ToolDef:
         except Exception as exc:  # noqa: BLE001
             return _err(f"failed to invoke renpy.sh distribute: {exc}")
 
-        # Diff against the pre-build snapshot — only surface paths that
-        # are NEW since the build started. Avoids reporting stale
-        # artifacts left behind by previous runs.
+        # Surface every .zip / .bz2 inside the snapshot root whose
+        # mtime advanced after the build started. This catches both
+        # newly-created and freshly-overwritten artifacts.
         artifacts: list[str] = []
         if snapshot_root.is_dir():
             for p in snapshot_root.rglob("*"):
                 if not p.is_file() or p.suffix.lower() not in (".zip", ".bz2"):
                     continue
-                resolved_path = p.resolve()
-                if resolved_path in before:
+                try:
+                    if p.stat().st_mtime >= build_started_at:
+                        artifacts.append(str(p.resolve()))
+                except OSError:
                     continue
-                artifacts.append(str(resolved_path))
 
         return _ok(
             {

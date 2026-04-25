@@ -164,6 +164,28 @@ export function Build() {
   );
 }
 
+/**
+ * Best-effort path-of-the-output-folder for the success card.
+ *  - When the user passed a destination, that's the path.
+ *  - Otherwise we derive it from the first artifact's parent directory
+ *    so the user can see exactly where to look (typically
+ *    `<project_parent>/<name>-<version>-dists/`).
+ *  - Worst case (artifacts list empty), fall back to the project parent.
+ */
+function deriveOutputDir(report: {
+  destination?: string | null;
+  default_destination?: string;
+  artifacts?: string[];
+}): string {
+  if (report.destination) return report.destination;
+  const first = report.artifacts && report.artifacts[0];
+  if (first) {
+    const lastSlash = Math.max(first.lastIndexOf("/"), first.lastIndexOf("\\"));
+    if (lastSlash > 0) return first.slice(0, lastSlash);
+  }
+  return report.default_destination ?? "(unknown)";
+}
+
 function DistributeSection() {
   const [targets, setTargets] = useState<Record<string, boolean>>({
     pc: true,
@@ -310,20 +332,14 @@ function DistributeSection() {
         <div className="space-y-3">
           {report.artifacts && report.artifacts.length > 0 && (
             <div className="border border-emerald-200 bg-emerald-50 rounded p-3 text-xs">
-              <div className="flex items-baseline justify-between mb-1.5">
-                <strong className="text-emerald-800">
+              <div className="mb-1.5">
+                <strong className="text-emerald-800 block">
                   {report.artifacts.length} artifact
                   {report.artifacts.length === 1 ? "" : "s"} produced
                 </strong>
-                {report.destination ? (
-                  <span className="font-mono text-emerald-700">
-                    in <code>{report.destination}</code>
-                  </span>
-                ) : (
-                  <span className="font-mono text-emerald-700">
-                    next to the project folder
-                  </span>
-                )}
+                <span className="font-mono text-emerald-700 text-[11px]">
+                  in <code>{deriveOutputDir(report)}</code>
+                </span>
               </div>
               <ul className="space-y-0.5">
                 {report.artifacts.map((path) => {
