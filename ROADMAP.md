@@ -16,11 +16,17 @@ that touches `.rpy` bytes still routes through `apply_write` (DESIGN.md
 ## Reference: Vangard / Ren'IDE
 
 [bluemoonfoundry/bmf-vangard-renpy-ide](https://github.com/bluemoonfoundry/bmf-vangard-renpy-ide)
-is an Electron + React/TS Ren'Py IDE at v0.8.0 Public Beta 4. It treats
-AI as an afterthought (encrypted API key storage and nothing else), but
-its analysis pipeline, three-canvas concept, visual composers, warp
-flow, and watcher discipline are exactly what an IDE *with* a first-class
-MCP server wants under the hood.
+is an Electron + React/TS Ren'Py IDE at v0.8.0 Public Beta 4, licensed
+AGPL-3.0. It treats AI as an afterthought (encrypted API key storage and
+nothing else), but its analysis pipeline, three-canvas concept, visual
+composers, warp flow, and watcher discipline are exactly what an IDE
+*with* a first-class MCP server wants under the hood.
+
+**License note:** This project relicensed from MIT to AGPL-3.0-or-later
+to make code-level adaptation from Vangard legally clean. Track A
+onward can borrow translated implementations directly without a
+separate license grant; attribution to upstream files in commit
+messages is still expected.
 
 What we're learning from it, filtered through our invariants:
 

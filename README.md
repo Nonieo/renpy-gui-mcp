@@ -356,4 +356,19 @@ Full rationale in [DESIGN §10](DESIGN.md#10-non-goals-what-this-repo-explicitly
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+AGPL-3.0-or-later — see [LICENSE](LICENSE).
+
+The project relicensed from MIT to AGPL-3.0 in commit-after-`c728830` to
+enable code-level adaptation from AGPL-licensed Ren'Py IDEs (notably
+[bluemoonfoundry/bmf-vangard-renpy-ide](https://github.com/bluemoonfoundry/bmf-vangard-renpy-ide)).
+Snapshots taken before that commit remain MIT-licensed.
+
+**What AGPL means in practice for users:**
+
+- Forks and modifications must stay AGPL-3.0-or-later.
+- The §13 network clause applies to the GUI: anyone who runs the GUI as
+  a hosted service for users beyond themselves must offer the
+  corresponding source to those users.
+- MCP harnesses (Claude Code, hermes-agent, Cursor) communicate with the
+  server over stdio as separate processes. They are not derivative
+  works of the server merely by calling its tools.

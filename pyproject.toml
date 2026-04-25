@@ -7,7 +7,7 @@ name = "renpy-mcp"
 version = "0.1.0"
 description = "MCP server exposing Ren'Py visual novel development as structured tools"
 readme = "README.md"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 keywords = ["mcp", "renpy", "visual-novel", "agent", "tooling"]
