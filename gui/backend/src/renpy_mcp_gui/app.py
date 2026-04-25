@@ -82,15 +82,106 @@ class AddMinigameScaffold(BaseModel):
     label_file: str | None = None
 
 
+class CanvasPositionsBody(BaseModel):
+    positions: dict[str, dict[str, float]]
+    replace: bool = False
+
+
+class AddLabelBody(BaseModel):
+    body: list[str] | None = None
+    file: str | None = None
+
+
+class AddMenuBranchBody(BaseModel):
+    text: str
+    body: list[str] | None = None
+    condition: str | None = None
+    raw: bool = False
+
+
+class AddJumpBody(BaseModel):
+    target: str
+
+
+# ---------- Phase 4 event-stream bodies ----------------------------------------
+
+
+class AddPauseBody(BaseModel):
+    duration: float
+
+
+class AddSetvarBody(BaseModel):
+    name: str
+    # JSON value of any supported scalar (string/bool/int/float/null). The
+    # backend `add_setvar` tool validates the type itself, so we accept
+    # anything here and forward it along.
+    value: Any = None
+
+
+class AddShowBody(BaseModel):
+    tag: str
+    expression: str | None = None
+    position: str | None = None
+    transition: str | None = None
+
+
+class AddWithEffectBody(BaseModel):
+    expression: str
+
+
+class AddFlashBody(BaseModel):
+    color: str
+    duration: float | None = None
+
+
+class BuildDistributeBody(BaseModel):
+    targets: list[str]
+
+
+class ScreenLayoutBody(BaseModel):
+    name: str
+    root: dict[str, Any]
+    file: str | None = None
+
+
+class StageBody(BaseModel):
+    label: str
+    background: str | None = None
+    sprites: list[dict[str, Any]] | None = None
+    transition: str | None = None
+
+
+class ImageMapBody(BaseModel):
+    name: str
+    ground: str
+    hover: str
+    hotspots: list[dict[str, Any]]
+    file: str | None = None
+
+
+class RedirectJumpBody(BaseModel):
+    file: str
+    line: int
+    new_target: str
+
+
+class AddMenuBody(BaseModel):
+    choices: list[dict]
+
+
 def _make_lifespan(project_root: Path, sdk_root: Path):
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         state.project_root = project_root
         state.sdk_root = sdk_root
         state.ws_clients = set()
-        state.client = RenpyMcpClient(project_root, sdk_root)
-        await state.client.start()
+        # Construct the watcher first so we have a `mark_self_write` target
+        # for the MCP client's response observer.
         state.watcher = ProjectWatcher(project_root)
+        state.client = RenpyMcpClient(
+            project_root, sdk_root, response_observer=_self_write_observer
+        )
+        await state.client.start()
         state.watcher.start(asyncio.get_running_loop())
         state.fanout_task = asyncio.create_task(_fanout_file_events())
         try:
@@ -102,6 +193,29 @@ def _make_lifespan(project_root: Path, sdk_root: Path):
             await state.client.stop()
 
     return lifespan
+
+
+def _self_write_observer(_name: str, payload: dict[str, Any]) -> None:
+    """Mark every file an internal write touched so the watcher skips its echo.
+
+    Single-file writes (Tier 2 primitives, most Tier 3 intents) return a
+    top-level `file`. Multi-file writes (e.g. `add_minigame_screen_scaffold`)
+    return a `diffs` array of `{file, ...}` entries. Sidecar tools
+    (`set_canvas_positions`, `set_ignored_diagnostics`) write outside
+    `game/` and do not return `file` — naturally skipped here.
+    """
+    if not isinstance(payload, dict) or "error" in payload:
+        return
+    rel = payload.get("file")
+    if isinstance(rel, str) and rel:
+        state.watcher.mark_self_write(rel)
+    diffs = payload.get("diffs")
+    if isinstance(diffs, list):
+        for entry in diffs:
+            if isinstance(entry, dict):
+                f = entry.get("file")
+                if isinstance(f, str) and f:
+                    state.watcher.mark_self_write(f)
 
 
 async def _fanout_file_events() -> None:
@@ -225,6 +339,144 @@ def build_app(project_root: Path, sdk_root: Path, static_dir: Path | None = None
         return await state.client.call(
             "add_minigame_screen_scaffold", body.model_dump(exclude_none=True)
         )
+
+    # ---------- canvas positions (Story Map) ----------
+
+    @app.get("/api/canvas-positions")
+    async def read_positions() -> Any:
+        return await state.client.call("read_canvas_positions")
+
+    @app.post("/api/canvas-positions")
+    async def write_positions(body: CanvasPositionsBody = Body(...)) -> Any:
+        return await state.client.call(
+            "set_canvas_positions",
+            body.model_dump(exclude_none=True),
+        )
+
+    # ---------- Story Map editing (Phase 3b) ----------
+
+    @app.post("/api/labels/{name}")
+    async def create_label(name: str, body: AddLabelBody = Body(...)) -> Any:
+        args: dict[str, Any] = {"name": name}
+        args.update(body.model_dump(exclude_none=True))
+        return await state.client.call("add_label", args)
+
+    @app.delete("/api/labels/{name}")
+    async def remove_label(name: str) -> Any:
+        return await state.client.call("delete_label", {"label": name})
+
+    @app.post("/api/labels/{name}/menu")
+    async def attach_menu(name: str, body: AddMenuBody = Body(...)) -> Any:
+        return await state.client.call(
+            "add_menu", {"label": name, "choices": body.choices}
+        )
+
+    @app.post("/api/labels/{name}/menu-branches")
+    async def append_menu_branch(name: str, body: AddMenuBranchBody = Body(...)) -> Any:
+        args: dict[str, Any] = {"label": name}
+        args.update(body.model_dump(exclude_none=True))
+        return await state.client.call("add_menu_branch", args)
+
+    @app.post("/api/labels/{name}/jumps")
+    async def append_jump(name: str, body: AddJumpBody = Body(...)) -> Any:
+        return await state.client.call(
+            "add_jump", {"label": name, "target": body.target}
+        )
+
+    # ---------- label tree (Phase 4 Inspector) ----------
+
+    @app.get("/api/labels/{name}/tree")
+    async def label_tree(name: str) -> Any:
+        payload = await state.client.call("read_label_tree", {"name": name})
+        if "error" in payload:
+            raise HTTPException(404, payload["error"])
+        return payload
+
+    @app.get("/api/choice-graph")
+    async def choice_graph() -> Any:
+        return await state.client.call("get_choice_graph")
+
+    # ---------- translations + distribute (Phase 8) ----------
+
+    @app.get("/api/translations/coverage")
+    async def translation_coverage() -> Any:
+        return await state.client.call("get_translation_coverage")
+
+    @app.get("/api/translations/stale")
+    async def stale_translations(language: str | None = None) -> Any:
+        args: dict[str, Any] = {}
+        if language is not None:
+            args["language"] = language
+        return await state.client.call("find_stale_translations", args)
+
+    @app.post("/api/translations/scaffolding/{language}")
+    async def scaffold_translations(language: str) -> Any:
+        return await state.client.call(
+            "generate_translation_scaffolding", {"language": language}
+        )
+
+    @app.post("/api/build/distribute")
+    async def build_distribute(body: BuildDistributeBody = Body(...)) -> Any:
+        return await state.client.call("build_distribution", {"targets": body.targets})
+
+    # ---------- composers (Phase 7) ----------
+
+    @app.post("/api/composers/screen-layout")
+    async def composer_screen_layout(body: ScreenLayoutBody = Body(...)) -> Any:
+        return await state.client.call(
+            "add_screen_layout", body.model_dump(exclude_none=True)
+        )
+
+    @app.post("/api/composers/stage")
+    async def composer_stage(body: StageBody = Body(...)) -> Any:
+        return await state.client.call("add_stage", body.model_dump(exclude_none=True))
+
+    @app.post("/api/composers/imagemap")
+    async def composer_imagemap(body: ImageMapBody = Body(...)) -> Any:
+        return await state.client.call(
+            "add_imagemap", body.model_dump(exclude_none=True)
+        )
+
+    # ---------- Phase 4 event-stream tools ----------
+
+    @app.post("/api/labels/{name}/events/pause")
+    async def append_pause(name: str, body: AddPauseBody = Body(...)) -> Any:
+        return await state.client.call("add_pause", {"label": name, "duration": body.duration})
+
+    @app.post("/api/labels/{name}/events/setvar")
+    async def append_setvar(name: str, body: AddSetvarBody = Body(...)) -> Any:
+        return await state.client.call(
+            "add_setvar",
+            {"label": name, "name": body.name, "value": body.value},
+        )
+
+    @app.post("/api/labels/{name}/events/show")
+    async def append_show(name: str, body: AddShowBody = Body(...)) -> Any:
+        args: dict[str, Any] = {"label": name, "tag": body.tag}
+        if body.expression is not None:
+            args["expression"] = body.expression
+        if body.position is not None:
+            args["position"] = body.position
+        if body.transition is not None:
+            args["transition"] = body.transition
+        return await state.client.call("add_show", args)
+
+    @app.post("/api/labels/{name}/events/with")
+    async def append_with(name: str, body: AddWithEffectBody = Body(...)) -> Any:
+        return await state.client.call(
+            "add_with_effect", {"label": name, "expression": body.expression}
+        )
+
+    @app.post("/api/labels/{name}/events/flash")
+    async def append_flash(name: str, body: AddFlashBody = Body(...)) -> Any:
+        args: dict[str, Any] = {"label": name, "color": body.color}
+        if body.duration is not None:
+            args["duration"] = body.duration
+        return await state.client.call("add_flash", args)
+
+    @app.post("/api/jumps/redirect")
+    async def redirect_jump(body: RedirectJumpBody = Body(...)) -> Any:
+        return await state.client.call("redirect_jump", body.model_dump(exclude_none=True))
 
     # ---------- preview lifecycle ----------
 

@@ -230,7 +230,10 @@ def test_stop_preview_when_idle_is_safe(app_client):
     client, _ = app_client
     r = client.delete("/api/preview")
     assert r.status_code == 200
-    assert r.json() == {"running": False}
+    body = r.json()
+    assert body["running"] is False
+    # Phase 5 added warp_temp cleanup reporting; idle stops always report False.
+    assert body.get("warp_temp_removed") is False
 
 
 # ---------- websocket file watcher ---------------------------------------------

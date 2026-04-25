@@ -26,7 +26,7 @@ def build_server(config: ServerConfig) -> tuple[Server, ToolRegistry]:
 
     if 1 in config.tiers:
         tier1_read.register(registry, config, index)
-        lifecycle.register(registry, config)
+        lifecycle.register(registry, config, index)
     if 2 in config.tiers:
         tier2_write.register(registry, config, index)
     if 3 in config.tiers:

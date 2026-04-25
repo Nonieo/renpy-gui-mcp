@@ -16,6 +16,20 @@ import mcp.types as types
 
 from .. import sdk as renpy_sdk
 from ..config import ServerConfig
+from ..project.asset_refs import collect_missing_image_refs
+from ..project.canvas import CanvasError, read_positions
+from ..project.diagnostics import DiagnosticsError, filter_diagnostics, read_ignored
+from ..project.label_tree import (
+    infer_label_kind,
+    iter_statements,
+    parse_label_body,
+    parse_label_from_disk,
+)
+from ..project.translations import (
+    coverage_summary,
+    list_languages,
+    parse_language,
+)
 from ..project.scanner import (
     CharacterInfo,
     LabelInfo,
@@ -34,6 +48,7 @@ def register(registry: ToolRegistry, config: ServerConfig, index: ProjectIndex) 
     registry.add(_get_project_overview(config, index))
     registry.add(_list_labels(index))
     registry.add(_read_label(config, index))
+    registry.add(_read_label_tree(config, index))
     registry.add(_list_characters(index))
     registry.add(_read_character(index))
     registry.add(_list_variables(index))
@@ -44,6 +59,18 @@ def register(registry: ToolRegistry, config: ServerConfig, index: ProjectIndex) 
     registry.add(_find_references(config))
     registry.add(_read_raw_file(config))
     registry.add(_get_lint_report(config))
+    registry.add(_read_canvas_positions(config))
+    registry.add(_find_invalid_jumps(config, index))
+    registry.add(_find_undefined_characters(config, index))
+    registry.add(_find_unused_characters(config, index))
+    registry.add(_find_missing_assets(config, index))
+    registry.add(_find_undefined_screens(config, index))
+    registry.add(_find_unreachable_labels(config, index))
+    registry.add(_read_ignored_diagnostics(config))
+    registry.add(_refresh_project(index))
+    registry.add(_get_choice_graph(config, index))
+    registry.add(_get_translation_coverage(config))
+    registry.add(_find_stale_translations(config))
 
 
 # ---------- get_project_overview ------------------------------------------------
@@ -182,6 +209,73 @@ def _read_label(config: ServerConfig, index: ProjectIndex) -> ToolDef:
             "line, body, and source range (file + line numbers). Use this after "
             "`list_labels` when you need to see what a scene actually does — "
             "dialogue, jumps, menus, music, conditions."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- read_label_tree -----------------------------------------------------
+
+
+def _read_label_tree(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "The label name as written after `label ` (no colon).",
+            },
+        },
+        "required": ["name"],
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        name = arguments["name"]
+        snap = index.snapshot()
+        matches = [l for l in snap.labels if l.name == name]
+        if not matches:
+            return _err(f"no such label: {name}")
+        if len(matches) > 1:
+            return _err(
+                f"label `{name}` is declared in multiple places — fix the duplicates first",
+                locations=[_label_dict(l) for l in matches],
+            )
+        label = matches[0]
+        text = (config.project_root / label.range.file).read_text(encoding="utf-8", errors="replace")
+        all_lines = text.splitlines()
+        # Body lines are everything between header (start_line) and end_line
+        # inclusive, dropping the header itself. start_line/end_line are 1-based.
+        body_lines = all_lines[label.range.start_line : label.range.end_line]
+        body_text = "\n".join(body_lines)
+        body_start = label.range.start_line + 1  # 1-based file line of first body line
+        tree = parse_label_body(body_text, body_start)
+        kind = infer_label_kind(name, tree["body"], tree["shorthand"])
+        return _ok(
+            {
+                "label": _label_dict(label),
+                "kind": kind,
+                "body": tree["body"],
+                "shorthand": tree["shorthand"],
+                "unparsed": tree["unparsed"],
+            }
+        )
+
+    return ToolDef(
+        name="read_label_tree",
+        description=(
+            "Return ONE label as a typed, ordered tree of recognized statements "
+            "(say, scene, show, hide, play, stop, pause, jump, call, return, "
+            "with, set, menu, if). Pairs with `read_label` (which returns raw "
+            "source). The `body` array preserves source order so the GUI "
+            "Inspector can render an editable stream; `shorthand` summarises "
+            "background, music, outgoing jump/call targets, and whether the "
+            "label ends in `return`. Lines the parser cannot interpret end up "
+            "in `unparsed` so callers know what they shouldn't silently "
+            "rewrite. The `kind` field (start|scene|choice|ending) is a "
+            "structure-derived hint for the Story Map graph; it is not "
+            "authoritative."
         ),
         input_schema=schema,
         handler=handler,
@@ -632,7 +726,636 @@ def _get_lint_report(config: ServerConfig) -> ToolDef:
     )
 
 
+# ---------- read_canvas_positions ----------------------------------------------
+
+
+def _read_canvas_positions(config: ServerConfig) -> ToolDef:
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def handler(_arguments: dict[str, Any]) -> list[types.TextContent]:
+        try:
+            state = read_positions(config)
+        except CanvasError as exc:
+            return _err(str(exc))
+        return _ok(
+            {
+                "version": state.version,
+                "labels": state.labels,
+                "count": len(state.labels),
+            }
+        )
+
+    return ToolDef(
+        name="read_canvas_positions",
+        description=(
+            "Return saved Story Map positions for every label, as authored in "
+            "the GUI. Backed by `.renpy-mcp/canvas.json`. Returns an empty "
+            "`labels` map when the sidecar does not yet exist. The sidecar is "
+            "GUI metadata — it is not consumed by Ren'Py and is not required "
+            "for any tool to function. Pair with `set_canvas_positions` "
+            "(Tier 2) to persist drag changes."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- diagnostics (Phase 1) ----------------------------------------------
+#
+# Diagnostic tools share one response shape so the agent loop is uniform:
+#
+#   {
+#     "rule": "<rule_name>",
+#     "diagnostics": [
+#       {"file", "line", "message", "severity", "rule", "label"?},
+#       ...
+#     ],
+#     "count": <int>,                 # diagnostics returned (post-suppression)
+#     "suppressed_count": <int>,      # diagnostics muted by the sidecar
+#   }
+#
+# Severity is "error" | "warning" | "info". The agent's iteration loop is:
+# write → re-snapshot → call diagnostics → self-correct. Every diagnostic
+# is cheap and pure-read; none of these replace `get_lint_report`, which
+# remains the authoritative call. Suppression comes from
+# `.renpy-mcp/ignored_diagnostics.json` and is applied uniformly via
+# `_diag_payload` so individual handlers stay focused on the rule logic.
+
+
+def _diag_payload(
+    config: ServerConfig,
+    rule: str,
+    diagnostics: list[dict[str, Any]],
+) -> list[types.TextContent]:
+    try:
+        ignored = read_ignored(config).ignored
+    except DiagnosticsError as exc:
+        # Malformed sidecar shouldn't crash a diagnostic call; surface it as
+        # a meta-warning so the agent can fix or wipe the sidecar, but still
+        # return the unfiltered diagnostics so they're not invisible.
+        return _ok(
+            {
+                "rule": rule,
+                "diagnostics": diagnostics,
+                "count": len(diagnostics),
+                "suppressed_count": 0,
+                "sidecar_warning": str(exc),
+            }
+        )
+    kept, suppressed = filter_diagnostics(diagnostics, ignored)
+    return _ok(
+        {
+            "rule": rule,
+            "diagnostics": kept,
+            "count": len(kept),
+            "suppressed_count": suppressed,
+        }
+    )
+
+
+def _walk_label_tree(config: ServerConfig, label: LabelInfo) -> dict[str, Any]:
+    """Convenience alias matching the older private name. New code should
+    call `parse_label_from_disk` directly."""
+    return parse_label_from_disk(config, label)
+
+
+def _find_invalid_jumps(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def handler(_arguments: dict[str, Any]) -> list[types.TextContent]:
+        snap = index.snapshot()
+        known = {l.name for l in snap.labels}
+        diagnostics: list[dict[str, Any]] = []
+        for label in snap.labels:
+            tree = _walk_label_tree(config, label)
+            for stmt in iter_statements(tree["body"]):
+                if stmt["kind"] not in ("jump", "call"):
+                    continue
+                target = stmt["target"]
+                if target in known:
+                    continue
+                diagnostics.append(
+                    {
+                        "rule": "invalid_jump",
+                        "severity": "error",
+                        "file": label.range.file,
+                        "line": stmt["line"],
+                        "label": label.name,
+                        "message": f"`{stmt['kind']} {target}` — no label named `{target}` exists",
+                    }
+                )
+        return _diag_payload(config, "invalid_jump", diagnostics)
+
+    return ToolDef(
+        name="find_invalid_jumps",
+        description=(
+            "Walk every label and flag every `jump` or `call` whose target "
+            "label does not exist in the project. Cheap pure read, complementary "
+            "to `get_lint_report`. Returns the standard diagnostics shape "
+            "`{rule, diagnostics: [{file, line, message, severity, rule, label}], "
+            "count}`. Severity is always `error` because Ren'Py crashes on these "
+            "at runtime."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+def _find_undefined_characters(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def handler(_arguments: dict[str, Any]) -> list[types.TextContent]:
+        snap = index.snapshot()
+        defined = {c.var_name for c in snap.characters}
+        diagnostics: list[dict[str, Any]] = []
+        for label in snap.labels:
+            tree = _walk_label_tree(config, label)
+            for stmt in iter_statements(tree["body"]):
+                if stmt["kind"] != "say":
+                    continue
+                who = stmt.get("character")
+                if who is None or who in defined:
+                    continue
+                diagnostics.append(
+                    {
+                        "rule": "undefined_character",
+                        "severity": "error",
+                        "file": label.range.file,
+                        "line": stmt["line"],
+                        "label": label.name,
+                        "message": (
+                            f"`{who} \"...\"` — no character named `{who}` is "
+                            "defined; add `define {who} = Character(...)` first"
+                        ).format(who=who),
+                    }
+                )
+        return _diag_payload(config, "undefined_character", diagnostics)
+
+    return ToolDef(
+        name="find_undefined_characters",
+        description=(
+            "Walk every label and flag every say-statement whose speaker tag "
+            "is not bound by any `define x = Character(...)`. Narration "
+            "(unquoted-name say) is ignored. Severity `error` — Ren'Py's "
+            "engine treats undefined character variables as runtime "
+            "NameErrors. Returns the standard diagnostics shape."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+def _find_unused_characters(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def handler(_arguments: dict[str, Any]) -> list[types.TextContent]:
+        snap = index.snapshot()
+        speakers: set[str] = set()
+        for label in snap.labels:
+            tree = _walk_label_tree(config, label)
+            for stmt in iter_statements(tree["body"]):
+                if stmt["kind"] == "say" and stmt.get("character"):
+                    speakers.add(stmt["character"])
+        diagnostics: list[dict[str, Any]] = []
+        for char in snap.characters:
+            if char.var_name in speakers:
+                continue
+            diagnostics.append(
+                {
+                    "rule": "unused_character",
+                    "severity": "warning",
+                    "file": char.range.file,
+                    "line": char.range.start_line,
+                    "label": None,
+                    "message": (
+                        f"character `{char.var_name}` is defined but never speaks; "
+                        "either add dialogue or remove the definition"
+                    ),
+                }
+            )
+        return _diag_payload(config, "unused_character", diagnostics)
+
+    return ToolDef(
+        name="find_unused_characters",
+        description=(
+            "Flag every `define x = Character(...)` whose say-tag never appears "
+            "in any label's dialogue. Severity `warning` — unused characters are "
+            "harmless at runtime but usually indicate a half-finished cast or a "
+            "rename that left the old definition behind. Returns the standard "
+            "diagnostics shape; each entry points at the character's `define` "
+            "line so the agent can either delete the definition or wire up "
+            "missing dialogue."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+def _find_missing_assets(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def handler(_arguments: dict[str, Any]) -> list[types.TextContent]:
+        snap = index.snapshot()
+        diagnostics: list[dict[str, Any]] = []
+
+        # Image refs come from the shared asset-resolution helper so this
+        # diagnostic and `set_drafting_mode` agree on what's missing.
+        for ref in collect_missing_image_refs(config, index):
+            diagnostics.append(
+                {
+                    "rule": "missing_asset",
+                    "severity": "error",
+                    "file": ref["file"],
+                    "line": ref["line"],
+                    "label": ref["label"],
+                    "message": (
+                        f"image `{ref['name']}` is not defined as an alias, "
+                        "layered image, or auto-named file under `game/images/`"
+                    ),
+                }
+            )
+
+        # Audio refs (and audio refs only) stay inline — drafting mode
+        # doesn't generate audio fallbacks, so there's no shared helper.
+        for label in snap.labels:
+            tree = _walk_label_tree(config, label)
+            for stmt in iter_statements(tree["body"]):
+                if stmt["kind"] == "play":
+                    asset = stmt["asset"]
+                    if not asset:
+                        continue
+                    candidate = config.project_root / "game" / asset
+                    if candidate.is_file():
+                        continue
+                    # Some projects store the path with a leading `audio/` —
+                    # also accept assets given as just the relative path.
+                    if (config.project_root / asset).is_file():
+                        continue
+                    diagnostics.append(
+                        {
+                            "rule": "missing_asset",
+                            "severity": "error",
+                            "file": label.range.file,
+                            "line": stmt["line"],
+                            "label": label.name,
+                            "message": (
+                                f"`play {stmt['channel']} \"{asset}\"` — file "
+                                f"not found under `game/{asset}`"
+                            ),
+                        }
+                    )
+        return _diag_payload(config, "missing_asset", diagnostics)
+
+    return ToolDef(
+        name="find_missing_assets",
+        description=(
+            "Walk every label and flag every `scene`/`show`/`play` reference "
+            "whose target asset can't be resolved. For images: not defined as "
+            "an alias (`image bg park = ...`), not a `layeredimage`, and no "
+            "auto-named file under `game/images/` (auto-naming converts "
+            "filename underscores to spaces). For audio: the quoted path "
+            "doesn't resolve under `game/`. Severity `error` because Ren'Py "
+            "raises at runtime when the asset is reached. `show screen X` "
+            "references are routed to `find_undefined_screens` instead."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+def _find_undefined_screens(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def handler(_arguments: dict[str, Any]) -> list[types.TextContent]:
+        snap = index.snapshot()
+        defined = {s.name for s in snap.screens}
+        diagnostics: list[dict[str, Any]] = []
+
+        for label in snap.labels:
+            tree = _walk_label_tree(config, label)
+            for stmt in iter_statements(tree["body"]):
+                screen_name: str | None = None
+                if stmt["kind"] == "show" and stmt["expression"].startswith("screen "):
+                    screen_name = _first_word(stmt["expression"][len("screen ") :])
+                elif stmt["kind"] == "call" and stmt["target"] == "screen":
+                    rest = stmt.get("rest") or ""
+                    screen_name = _first_word(rest) if rest else None
+                if not screen_name or screen_name in defined:
+                    continue
+                diagnostics.append(
+                    {
+                        "rule": "undefined_screen",
+                        "severity": "error",
+                        "file": label.range.file,
+                        "line": stmt["line"],
+                        "label": label.name,
+                        "message": (
+                            f"screen `{screen_name}` is referenced but never "
+                            "declared with `screen ...:`"
+                        ),
+                    }
+                )
+        return _diag_payload(config, "undefined_screen", diagnostics)
+
+    return ToolDef(
+        name="find_undefined_screens",
+        description=(
+            "Walk every label and flag every `show screen X` or `call screen "
+            "X` whose screen has no `screen X():` declaration anywhere in the "
+            "project. Severity `error` — Ren'Py raises at runtime on missing "
+            "screens. Returns the standard diagnostics shape."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+def _find_unreachable_labels(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def handler(_arguments: dict[str, Any]) -> list[types.TextContent]:
+        snap = index.snapshot()
+        # Build forward edge map: label -> set of jump/call targets it reaches.
+        # Anything reachable from `start` (or any `init_*` style entry, plus
+        # explicit roots if they appear) is considered live.
+        adjacency: dict[str, set[str]] = {}
+        for label in snap.labels:
+            tree = _walk_label_tree(config, label)
+            adjacency[label.name] = set(tree["shorthand"]["outgoing_targets"])
+
+        roots: set[str] = set()
+        if any(l.name == "start" for l in snap.labels):
+            roots.add("start")
+        # Treat every `init`-prefixed label as a root too — users sometimes
+        # author setup paths there. Conservative; reduces false positives.
+        for label in snap.labels:
+            if label.name.startswith("init"):
+                roots.add(label.name)
+
+        reachable: set[str] = set()
+        stack: list[str] = list(roots)
+        while stack:
+            current = stack.pop()
+            if current in reachable:
+                continue
+            reachable.add(current)
+            for nxt in adjacency.get(current, ()):
+                if nxt not in reachable:
+                    stack.append(nxt)
+
+        diagnostics: list[dict[str, Any]] = []
+        for label in snap.labels:
+            if label.name in reachable:
+                continue
+            if not roots:
+                # No `start` and no `init*` label — every label is "unreachable"
+                # which is just noise. Skip the diagnostic in that degenerate
+                # case; `get_project_overview` already warns about no `start`.
+                continue
+            diagnostics.append(
+                {
+                    "rule": "unreachable_label",
+                    "severity": "warning",
+                    "file": label.range.file,
+                    "line": label.range.start_line,
+                    "label": label.name,
+                    "message": (
+                        f"label `{label.name}` is not reached from `start` via "
+                        "any `jump`/`call`; either wire it in, mark it as an "
+                        "intentional entry-point with an `init`-prefixed name, "
+                        "or suppress this rule for the label"
+                    ),
+                }
+            )
+        return _diag_payload(config, "unreachable_label", diagnostics)
+
+    return ToolDef(
+        name="find_unreachable_labels",
+        description=(
+            "Flag every label not reachable from `start` (or from any "
+            "`init`-prefixed label) by following `jump`/`call` edges, "
+            "including those nested inside menus and if-branches. Severity "
+            "`warning` — unreachable labels are dead code, not crashes. "
+            "Useful before a release to spot orphaned drafts. Returns the "
+            "standard diagnostics shape."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+def _read_ignored_diagnostics(config: ServerConfig) -> ToolDef:
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def handler(_arguments: dict[str, Any]) -> list[types.TextContent]:
+        try:
+            state = read_ignored(config)
+        except DiagnosticsError as exc:
+            return _err(str(exc))
+        return _ok(
+            {
+                "version": state.version,
+                "ignored": state.ignored,
+                "count": len(state.ignored),
+            }
+        )
+
+    return ToolDef(
+        name="read_ignored_diagnostics",
+        description=(
+            "Return the suppression list applied to every `find_*` diagnostic "
+            "tool. Backed by `.renpy-mcp/ignored_diagnostics.json`. Each "
+            "entry is `{rule, file?, line?, label?}`: a diagnostic is "
+            "suppressed when every field present in an entry equals the "
+            "diagnostic's value. So `{rule: \"unused_character\"}` mutes that "
+            "rule project-wide; `{rule, file, line}` mutes one occurrence. "
+            "Pair with `set_ignored_diagnostics` (Tier 2) to update."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+def _get_choice_graph(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    """Walk every label, surface the menus and their branches as a flat
+    choice graph. Powers the Choice View — the player-facing derived
+    filter the ROADMAP committed to alongside Story Map.
+
+    Each choice record describes ONE top-level `menu:` in a label and
+    its branches. Per-branch `target` is the FIRST top-level `jump`/
+    `call` in the branch's body — nested menus or `if`-conditional
+    targets aren't unfolded; this matches the way authors think about a
+    choice ("if I pick option X, where do I land next").
+    """
+
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def handler(_arguments: dict[str, Any]) -> list[types.TextContent]:
+        snap = index.snapshot()
+        choices: list[dict[str, Any]] = []
+        for label in snap.labels:
+            tree = parse_label_from_disk(config, label)
+            for menu in (n for n in tree["body"] if n["kind"] == "menu"):
+                branches = []
+                for choice in menu["choices"]:
+                    target_stmt = next(
+                        (s for s in choice["body"] if s["kind"] in ("jump", "call")),
+                        None,
+                    )
+                    branches.append(
+                        {
+                            "text": choice["text"],
+                            "condition": choice["condition"],
+                            "line": choice["line"],
+                            "target": target_stmt["target"] if target_stmt else None,
+                            "target_kind": target_stmt["kind"] if target_stmt else None,
+                            "target_line": target_stmt["line"] if target_stmt else None,
+                        }
+                    )
+                choices.append(
+                    {
+                        "label": label.name,
+                        "file": label.range.file,
+                        "line": menu["line"],
+                        "menu_label": menu["menu_label"],
+                        "branches": branches,
+                    }
+                )
+        return _ok({"choices": choices, "count": len(choices)})
+
+    return ToolDef(
+        name="get_choice_graph",
+        description=(
+            "Return every top-level `menu:` in the project as a flat list of "
+            "choice records. Each record has `{label, file, line, "
+            "menu_label, branches}`; each branch carries `{text, condition, "
+            "target, target_kind, target_line}`. The target is the FIRST "
+            "top-level `jump`/`call` in the branch's body — nested menus or "
+            "`if`-conditional targets aren't unfolded. Used by the Choice "
+            "View to render the player-facing walkthrough."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+def _get_translation_coverage(config: ServerConfig) -> ToolDef:
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def handler(_arguments: dict[str, Any]) -> list[types.TextContent]:
+        rows = coverage_summary(config)
+        return _ok({"languages": rows, "count": len(rows)})
+
+    return ToolDef(
+        name="get_translation_coverage",
+        description=(
+            "Return per-language translation coverage from `game/tl/<lang>/`. "
+            "Each row is `{language, total, translated, stale, percent}` "
+            "where stale entries are those with empty translations or "
+            "translations identical to the source. Returns an empty list "
+            "when no `tl/` directory exists yet — call "
+            "`generate_translation_scaffolding` to bootstrap one."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+def _find_stale_translations(config: ServerConfig) -> ToolDef:
+    schema = {
+        "type": "object",
+        "properties": {
+            "language": {
+                "type": "string",
+                "description": (
+                    "Language directory name under `game/tl/` (e.g. `spanish`). "
+                    "Omit to scan every language."
+                ),
+            },
+        },
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        language: str | None = arguments.get("language")
+        languages = [language] if language else list_languages(config)
+        stale: list[dict[str, Any]] = []
+        for lang in languages:
+            for entry in parse_language(config, lang):
+                if not entry.is_stale:
+                    continue
+                stale.append(
+                    {
+                        "language": lang,
+                        "kind": entry.kind,
+                        "block_id": entry.block_id,
+                        "source": entry.source,
+                        "target": entry.target,
+                        "file": entry.file,
+                        "line": entry.line,
+                    }
+                )
+        return _ok({"stale": stale, "count": len(stale)})
+
+    return ToolDef(
+        name="find_stale_translations",
+        description=(
+            "Return translation entries that are still empty or identical to "
+            "the source string. Pass `language` to filter to one directory; "
+            "omit to scan every language under `game/tl/`. Each entry "
+            "carries `{language, kind, block_id, source, target, file, "
+            "line}` — kind is `say` (per-line dialogue translation) or "
+            "`string` (string-table). Use after `generate_translation_"
+            "scaffolding` to find the strings still needing human work."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+def _refresh_project(index: ProjectIndex) -> ToolDef:
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def handler(_arguments: dict[str, Any]) -> list[types.TextContent]:
+        snap = index.refresh()
+        return _ok(
+            {
+                "summary": "project index refreshed",
+                "counts": {
+                    "files": len(snap.files),
+                    "labels": len(snap.labels),
+                    "characters": len(snap.characters),
+                    "defaults": len(snap.defaults),
+                    "defines": len(snap.defines),
+                    "images": len(snap.images),
+                    "screens": len(snap.screens),
+                },
+            }
+        )
+
+    return ToolDef(
+        name="refresh_project",
+        description=(
+            "Force a fresh scan of the project from disk. Use after an "
+            "external write (another harness, a watcher event, manual edit) "
+            "so subsequent read tools reflect the on-disk state. The server "
+            "auto-refreshes after every internal write through `apply_write`; "
+            "this tool exists for the out-of-band case."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
 # ---------- helpers -------------------------------------------------------------
+
+
+def _first_word(text: str) -> str:
+    """Return the first whitespace-separated token, or "" for empty input."""
+    text = text.strip()
+    if not text:
+        return ""
+    return text.split()[0]
 
 
 def _label_dict(label: LabelInfo) -> dict[str, Any]:

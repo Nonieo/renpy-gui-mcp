@@ -1,0 +1,90 @@
+/* RPBuilder theme tokens — ported from renpy-gui/styles.css.
+   Drives the polished shell: three surface themes (cream / light / dark)
+   × six accent presets, plus typography. CSS variables are consumed by
+   Tailwind utilities (see tailwind.config.ts) and by component-scoped
+   classes in panels that need editorial styling.
+
+   Theme switching is attribute-driven: `usePrefs` writes
+   `data-theme` / `data-rail` / `data-density` on <html> and `--rp-accent`
+   as an inline style on the same element. */
+
+@import url("https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+/* Default surface = cream. Reads identically to data-theme="cream" so the
+   token set is always populated even before usePrefs's effect lands. */
+:root {
+  --rp-canvas: #f4efe6;
+  --rp-card: #fbf8f1;
+  --rp-card-2: #f0eadc;
+  --rp-ink: #1f1a14;
+  --rp-ink-2: #423a2e;
+  --rp-ink-3: #756a59;
+  --rp-line: rgba(31, 26, 20, 0.10);
+  --rp-line-2: rgba(31, 26, 20, 0.06);
+  --rp-rail: #1a1612;
+  --rp-rail-ink: #e6dfd1;
+  --rp-rail-ink-2: rgba(230, 223, 209, 0.55);
+  --rp-rail-line: rgba(230, 223, 209, 0.08);
+  --rp-edge: rgba(31, 26, 20, 0.42);
+  --rp-recent: oklch(0.78 0.13 75);
+  --rp-recent-soft: oklch(0.78 0.13 75 / 0.18);
+
+  --rp-serif: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --rp-sans:  "Inter Tight", ui-sans-serif, -apple-system, system-ui, sans-serif;
+  --rp-mono:  "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Default accent (plum). usePrefs overrides this on <html> based on
+     the chosen accent preset so component CSS can use var(--rp-accent)
+     uniformly. */
+  --rp-accent: oklch(0.55 0.13 350);
+}
+
+[data-theme="light"] {
+  --rp-canvas: #fafaf8;
+  --rp-card: #ffffff;
+  --rp-card-2: #f3f3f0;
+  --rp-ink: #18181b;
+  --rp-ink-2: #3f3f46;
+  --rp-ink-3: #71717a;
+  --rp-line: rgba(0, 0, 0, 0.08);
+  --rp-line-2: rgba(0, 0, 0, 0.04);
+  --rp-edge: rgba(0, 0, 0, 0.32);
+  --rp-rail: #18181b;
+  --rp-rail-ink: #fafafa;
+  --rp-rail-ink-2: rgba(250, 250, 250, 0.55);
+  --rp-rail-line: rgba(250, 250, 250, 0.08);
+}
+
+[data-theme="dark"] {
+  --rp-canvas: #14110d;
+  --rp-card: #1d1915;
+  --rp-card-2: #28231d;
+  --rp-ink: #ece4d3;
+  --rp-ink-2: #c4b89f;
+  --rp-ink-3: #8a7e67;
+  --rp-line: rgba(236, 228, 211, 0.10);
+  --rp-line-2: rgba(236, 228, 211, 0.05);
+  --rp-edge: rgba(236, 228, 211, 0.32);
+  --rp-rail: #0e0c09;
+  --rp-rail-ink: #ece4d3;
+  --rp-rail-ink-2: rgba(236, 228, 211, 0.5);
+  --rp-rail-line: rgba(236, 228, 211, 0.07);
+}
+
+/* Body baseline and global resets. */
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--rp-canvas);
+  color: var(--rp-ink);
+  font-family: var(--rp-sans);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button { font-family: inherit; }
+code, pre, .rp-mono { font-family: var(--rp-mono); }
+
+/* ReactFlow needs a sized parent. */
+.rf-shell { width: 100%; height: 100%; }

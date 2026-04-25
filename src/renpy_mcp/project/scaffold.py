@@ -123,6 +123,14 @@ _CONFIG_NAME_RE = re.compile(
     r"""^(?P<prefix>define\s+config\.name\s*=\s*_\()"[^"]*"(?P<suffix>\).*)$""",
     re.MULTILINE,
 )
+# Ren'Py's project template ships with `define build.name = "gui"` left
+# over from the launcher's own options. Distribute artifacts get named
+# after `build.name`, so without this rewrite every new project ends up
+# producing `gui-1.0-pc.zip` instead of `<project>-<version>-pc.zip`.
+_BUILD_NAME_RE = re.compile(
+    r"""^(?P<prefix>define\s+build\.name\s*=\s*)"[^"]*"(?P<suffix>.*)$""",
+    re.MULTILINE,
+)
 
 
 def _rename_in_options(options_path: Path, new_name: str) -> None:
@@ -130,8 +138,16 @@ def _rename_in_options(options_path: Path, new_name: str) -> None:
         return
     text = options_path.read_text(encoding="utf-8")
     escaped = new_name.replace('"', '\\"')
-    updated, count = _CONFIG_NAME_RE.subn(
+    text, _ = _CONFIG_NAME_RE.subn(
         rf'\g<prefix>"{escaped}"\g<suffix>', text, count=1
     )
-    if count:
-        options_path.write_text(updated, encoding="utf-8")
+    # `build.name` becomes part of `build.directory_name` and the
+    # generated artifact filenames. Ren'Py rejects spaces, colons, and
+    # semicolons in `build.directory_name`, so we slugify the name here
+    # even when the caller's display_name is human-friendly. The original
+    # display name still survives via config.name above.
+    build_safe = slugify(new_name)
+    text, _ = _BUILD_NAME_RE.subn(
+        rf'\g<prefix>"{build_safe}"\g<suffix>', text, count=1
+    )
+    options_path.write_text(text, encoding="utf-8")

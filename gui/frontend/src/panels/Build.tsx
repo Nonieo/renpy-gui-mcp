@@ -1,6 +1,14 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, AlertTriangle, AlertOctagon, Info, RefreshCw, Terminal } from "lucide-react";
+import {
+  CheckCircle2,
+  AlertTriangle,
+  AlertOctagon,
+  Info,
+  RefreshCw,
+  Terminal,
+  Download,
+} from "lucide-react";
 import { api } from "@/api/client";
 
 interface LintReport {
@@ -151,18 +159,148 @@ export function Build() {
         </>
       )}
 
-      <div className="mt-8 pt-4 border-t border-zinc-100 text-xs text-zinc-500 space-y-1">
-        <p>
-          <strong className="text-zinc-700">Coming next:</strong> distribution build (wraps a{" "}
-          <code className="font-mono">build_distribution</code> MCP tool) and
-          translation generation.
-        </p>
-        <p>
-          For now, distributions can be built directly:{" "}
-          <code className="font-mono">renpy.sh /path/to/project distribute</code>.
-        </p>
-      </div>
+      <DistributeSection />
     </div>
+  );
+}
+
+function DistributeSection() {
+  const [targets, setTargets] = useState<Record<string, boolean>>({
+    pc: true,
+    mac: true,
+    linux: true,
+  });
+  const [running, setRunning] = useState(false);
+  const [report, setReport] = useState<{
+    targets: string[];
+    returncode: number;
+    stdout: string;
+    stderr: string;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const PLATFORMS: { id: string; label: string; hint: string }[] = [
+    { id: "pc", label: "PC", hint: "Windows + Linux zip" },
+    { id: "mac", label: "macOS", hint: "universal zip" },
+    { id: "linux", label: "Linux", hint: "x86_64 tarball" },
+    { id: "web", label: "Web", hint: "browser export" },
+    { id: "steam", label: "Steam", hint: "depot bundle" },
+  ];
+
+  const selected = Object.entries(targets)
+    .filter(([, on]) => on)
+    .map(([id]) => id);
+  const toggle = (id: string) =>
+    setTargets((p) => ({ ...p, [id]: !p[id] }));
+
+  const startBuild = async () => {
+    if (!selected.length || running) return;
+    setRunning(true);
+    setError(null);
+    setReport(null);
+    try {
+      const data = await api<{
+        targets?: string[];
+        returncode?: number;
+        stdout?: string;
+        stderr?: string;
+        error?: string;
+      }>("/api/build/distribute", {
+        method: "POST",
+        json: { targets: selected },
+      });
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setReport({
+          targets: data.targets ?? [],
+          returncode: data.returncode ?? -1,
+          stdout: data.stdout ?? "",
+          stderr: data.stderr ?? "",
+        });
+      }
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <section className="mt-8 pt-6 border-t border-zinc-100">
+      <header className="flex items-baseline justify-between mb-3">
+        <div>
+          <span className="text-[10px] uppercase tracking-wide text-zinc-400 font-mono">
+            Distribute
+          </span>
+          <h2 className="font-serif text-lg text-zinc-800">Compile for…</h2>
+        </div>
+        <button
+          onClick={startBuild}
+          disabled={!selected.length || running}
+          className="px-3 py-1.5 text-sm rounded-md bg-accent text-white disabled:opacity-50 inline-flex items-center gap-1.5"
+        >
+          <Download className={running ? "w-4 h-4 animate-spin" : "w-4 h-4"} />
+          {running ? "Compiling…" : "Build distribution"}
+        </button>
+      </header>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
+        {PLATFORMS.map((p) => {
+          const on = !!targets[p.id];
+          return (
+            <button
+              key={p.id}
+              onClick={() => toggle(p.id)}
+              aria-pressed={on}
+              className={[
+                "flex flex-col items-start gap-0.5 px-3 py-2 rounded border text-left text-sm transition-colors",
+                on
+                  ? "border-zinc-800 bg-zinc-50"
+                  : "border-zinc-200 hover:border-zinc-400 text-zinc-500",
+              ].join(" ")}
+            >
+              <span className="font-medium text-zinc-800">{p.label}</span>
+              <span className="text-[10px] font-mono text-zinc-400">{p.hint}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <p className="text-xs text-zinc-500 mb-3">
+        {selected.length === 0
+          ? "Select at least one target."
+          : `${selected.length} target${selected.length === 1 ? "" : "s"} → renpy.sh distribute --packages=${selected.join(
+              ",",
+            )}`}
+      </p>
+
+      {error && (
+        <div className="border border-red-200 bg-red-50 rounded p-3 text-xs text-red-700 mb-3">
+          <strong>Error:</strong> {error}
+        </div>
+      )}
+
+      {report && (
+        <div className="border border-zinc-200 rounded text-xs overflow-hidden">
+          <header className="px-3 py-1.5 bg-zinc-50 border-b border-zinc-200 flex items-center justify-between font-mono text-zinc-500">
+            <span>
+              exit code: {report.returncode} ·{" "}
+              {report.targets.join(", ") || "(no targets)"}
+            </span>
+          </header>
+          <pre className="bg-zinc-900 text-zinc-100 font-mono p-3 overflow-auto max-h-72 leading-relaxed">
+            {report.stdout || "(empty stdout)"}
+            {report.stderr && (
+              <>
+                {"\n--- stderr ---\n"}
+                {report.stderr}
+              </>
+            )}
+          </pre>
+        </div>
+      )}
+    </section>
   );
 }
 

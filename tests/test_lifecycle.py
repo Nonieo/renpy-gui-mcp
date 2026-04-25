@@ -13,6 +13,7 @@ import json
 
 from renpy_mcp import tools as tools_pkg
 from renpy_mcp.config import ServerConfig
+from renpy_mcp.project.scanner import ProjectIndex
 from renpy_mcp.tools import lifecycle
 from renpy_mcp.tools.registry import ToolRegistry
 
@@ -27,7 +28,7 @@ def _parse(content_list):
 def _registry() -> ToolRegistry:
     cfg = ServerConfig(project_root=FIXTURE_ROOT.resolve(), sdk_root=SDK_ROOT)
     reg = ToolRegistry()
-    lifecycle.register(reg, cfg)
+    lifecycle.register(reg, cfg, ProjectIndex(cfg))
     return reg
 
 
@@ -44,7 +45,11 @@ async def test_status_when_idle():
 async def test_stop_when_idle():
     _reset_state()
     reg = _registry()
-    assert _parse(await reg.call("stop_preview", {})) == {"running": False}
+    out = _parse(await reg.call("stop_preview", {}))
+    assert out["running"] is False
+    # warp_temp_removed reports whether stop_preview scrubbed a stale warp
+    # file — irrelevant when nothing ever warped, but always present.
+    assert out.get("warp_temp_removed") is False
 
 
 async def test_launch_then_stop_via_fake_process(monkeypatch):
@@ -98,15 +103,16 @@ def test_atexit_hook_registered_once():
         calls.append(func)
 
     cfg = ServerConfig(project_root=FIXTURE_ROOT.resolve(), sdk_root=SDK_ROOT)
+    idx = ProjectIndex(cfg)
 
     # First register: should hook into atexit.
     original = atexit_mod.register
     atexit_mod.register = _spy  # type: ignore[assignment]
     try:
-        lifecycle.register(ToolRegistry(), cfg)
+        lifecycle.register(ToolRegistry(), cfg, idx)
         first_count = len(calls)
         # Second register: must NOT add another hook.
-        lifecycle.register(ToolRegistry(), cfg)
+        lifecycle.register(ToolRegistry(), cfg, idx)
         second_count = len(calls)
     finally:
         atexit_mod.register = original  # type: ignore[assignment]

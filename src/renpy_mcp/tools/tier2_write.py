@@ -20,6 +20,9 @@ import mcp.types as types
 from ..config import ServerConfig
 from ..guardrails.dialogue import escape_dialogue, reject_multiline
 from ..guardrails.reserved import reject_reserved_identifier
+from ..project.canvas import CanvasError, set_positions
+from ..project.diagnostics import DiagnosticsError, set_ignored
+from ..project.label_tree import iter_statements, parse_label_from_disk
 from ..project.scanner import ProjectIndex
 from ..project.writer import WriteRejected, WriteResult, apply_write
 from ._shared import (
@@ -58,6 +61,185 @@ def register(registry: ToolRegistry, config: ServerConfig, index: ProjectIndex) 
     registry.add(_add_transform(config, index))
     registry.add(_add_screen(config, index))
     registry.add(_update_options_field(config, index))
+    registry.add(_set_canvas_positions(config))
+    registry.add(_set_ignored_diagnostics(config))
+    registry.add(_add_menu_branch(config, index))
+    registry.add(_redirect_jump(config, index))
+    registry.add(_delete_label(config, index))
+    registry.add(_add_pause(config, index))
+    registry.add(_add_setvar(config, index))
+    registry.add(_add_show(config, index))
+    registry.add(_add_with_effect(config, index))
+    registry.add(_add_flash(config, index))
+
+
+# ---------- set_ignored_diagnostics ---------------------------------------------
+
+
+def _set_ignored_diagnostics(config: ServerConfig) -> ToolDef:
+    """Persist suppression entries for the diagnostic tools.
+
+    The ignored-diagnostics sidecar is GUI/agent metadata, not Ren'Py
+    syntax — same exemption from `apply_write` as the canvas sidecar
+    (DESIGN.md §3 / `project/diagnostics.py`). Atomic write + path
+    containment still apply.
+    """
+    schema = {
+        "type": "object",
+        "properties": {
+            "entries": {
+                "type": "array",
+                "description": (
+                    "List of suppression patterns. Each entry must include "
+                    "`rule` and may narrow with optional `file`, `line`, "
+                    "`label` fields. A diagnostic is suppressed when every "
+                    "field in the entry equals the diagnostic's value."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "rule": {"type": "string"},
+                        "file": {"type": "string"},
+                        "line": {"type": "integer"},
+                        "label": {"type": "string"},
+                    },
+                    "required": ["rule"],
+                    "additionalProperties": False,
+                },
+            },
+            "replace": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "If true, replace the entire saved list with `entries`. "
+                    "If false (default), append `entries` to the existing "
+                    "list, dropping exact-equal duplicates."
+                ),
+            },
+        },
+        "required": ["entries"],
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        entries = arguments["entries"]
+        replace = bool(arguments.get("replace", False))
+        if not isinstance(entries, list):
+            return err("entries must be a list of suppression patterns")
+        try:
+            new_state = set_ignored(config, entries, replace=replace)
+        except DiagnosticsError as exc:
+            return err(str(exc))
+        return ok(
+            {
+                "summary": (
+                    f"saved {len(entries)} entry(ies); "
+                    f"sidecar now holds {len(new_state.ignored)} suppression(s)"
+                ),
+                "version": new_state.version,
+                "ignored": new_state.ignored,
+                "count": len(new_state.ignored),
+            }
+        )
+
+    return ToolDef(
+        name="set_ignored_diagnostics",
+        description=(
+            "Persist suppression entries for the `find_*` diagnostic tools "
+            "into `.renpy-mcp/ignored_diagnostics.json`. Default behaviour "
+            "appends to the existing list (de-duplicating exact matches); "
+            "pass `replace: true` to overwrite. Each entry is "
+            "`{rule, file?, line?, label?}`. The sidecar is editor metadata "
+            "(not Ren'Py syntax) and so does NOT route through the "
+            "`apply_write` pipeline — see DESIGN.md §3."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- set_canvas_positions ------------------------------------------------
+
+
+def _set_canvas_positions(config: ServerConfig) -> ToolDef:
+    """Persist Story Map positions for one or more labels.
+
+    The canvas sidecar is GUI metadata, not Ren'Py syntax — Ren'Py never
+    reads it and `ProjectIndex` does not index it. This is the second
+    sanctioned exception to "every mutation goes through `apply_write`"
+    alongside `new_project`. See `project.canvas` for the rationale.
+    """
+    schema = {
+        "type": "object",
+        "properties": {
+            "positions": {
+                "type": "object",
+                "description": (
+                    "Map of label name to `{x, y}` (numbers). Keys must be "
+                    "label names; coordinates are in the GUI's world space. "
+                    "Labels not present in the map are left untouched unless "
+                    "`replace` is true."
+                ),
+                "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                        "x": {"type": "number"},
+                        "y": {"type": "number"},
+                    },
+                    "required": ["x", "y"],
+                    "additionalProperties": True,
+                },
+            },
+            "replace": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "If true, replace the entire saved map with `positions`. "
+                    "If false (default), merge `positions` over the existing "
+                    "saved map."
+                ),
+            },
+        },
+        "required": ["positions"],
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        positions = arguments["positions"]
+        replace = bool(arguments.get("replace", False))
+        if not isinstance(positions, dict):
+            return err("positions must be an object keyed by label name")
+        try:
+            new_state = set_positions(config, positions, replace=replace)
+        except CanvasError as exc:
+            return err(str(exc))
+        return ok(
+            {
+                "summary": (
+                    f"saved {len(positions)} position(s); "
+                    f"sidecar now tracks {len(new_state.labels)} label(s)"
+                ),
+                "version": new_state.version,
+                "labels": new_state.labels,
+                "count": len(new_state.labels),
+            }
+        )
+
+    return ToolDef(
+        name="set_canvas_positions",
+        description=(
+            "Persist Story Map positions for one or more labels into the "
+            "`.renpy-mcp/canvas.json` sidecar. Use after the GUI commits a "
+            "drag. Default behaviour merges `positions` over the existing map "
+            "so untouched labels keep their saved coordinates; pass "
+            "`replace: true` to overwrite the entire map. The sidecar is GUI "
+            "metadata (not Ren'Py syntax) and so does NOT route through the "
+            "standard `apply_write` pipeline — no diff, no `.rpyc` cleanup, "
+            "no index refresh. Atomic write + path containment still apply."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
 
 
 # ---------- add_label -----------------------------------------------------------
@@ -283,7 +465,10 @@ def _make_jumplike(config: ServerConfig, index: ProjectIndex, *, keyword: str) -
         description = (
             "Append a `jump <target>` statement to the end of an existing "
             "label's body. By default the target label must already exist; "
-            "pass `validate_target: false` to permit a forward-reference."
+            "pass `validate_target: false` to permit a forward-reference. "
+            "Refuses if the label already terminates with `jump`/`return` "
+            "(common for scenes created via `create_scene` or the scaffold's "
+            "`start` label) — pass `replace_terminator: true` to rewire."
         )
     else:
         description = (
@@ -1085,6 +1270,640 @@ def _update_options_field(config: ServerConfig, index: ProjectIndex) -> ToolDef:
         ),
         input_schema=schema,
         handler=handler,
+    )
+
+
+# ---------- add_menu_branch ----------------------------------------------------
+
+
+def _add_menu_branch(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {
+        "type": "object",
+        "properties": {
+            "label": {
+                "type": "string",
+                "description": "Label whose first top-level `menu:` block receives the new branch.",
+            },
+            "text": {
+                "type": "string",
+                "description": "Choice prompt. Auto-escaped like `add_say` text unless `raw` is true.",
+            },
+            "body": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Lines executed when this branch is selected. Defaults to `[\"pass\"]`. "
+                    "Indentation is generated automatically."
+                ),
+            },
+            "condition": {
+                "type": "string",
+                "description": "Optional Python expression gating the choice (`\"text\" if <condition>:`).",
+            },
+            "raw": {
+                "type": "boolean",
+                "default": False,
+                "description": "If true, skip metacharacter escaping on `text`.",
+            },
+        },
+        "required": ["label", "text"],
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        label_name: str = arguments["label"]
+        text: str = arguments["text"]
+        body: list[str] = arguments.get("body") or ["pass"]
+        condition: str | None = arguments.get("condition")
+        raw: bool = bool(arguments.get("raw", False))
+
+        if msg := reject_multiline(text):
+            return err(f"choice text: {msg}")
+
+        snap = index.snapshot()
+        label = find_single_label(snap.labels, label_name)
+        if isinstance(label, str):
+            return err(label)
+
+        # Walk the label's body to find the FIRST top-level `menu:` block.
+        # Nested menus (inside `if` branches or other menu choices) are
+        # intentionally skipped — they don't render as Story Map nodes
+        # and finer control there should use `apply_unified_diff`.
+        tree = parse_label_from_disk(config, label)
+        menu_node = next(
+            (n for n in tree["body"] if n["kind"] == "menu"), None
+        )
+        if menu_node is None:
+            return err(
+                f"label `{label_name}` has no top-level `menu:` block; "
+                "use `add_menu` to create one before adding branches"
+            )
+
+        rel = label.range.file
+        text_content = (config.project_root / rel).read_text(encoding="utf-8")
+        file_lines = text_content.splitlines()
+        menu_idx = menu_node["line"] - 1  # 0-based
+        menu_indent = len(file_lines[menu_idx]) - len(file_lines[menu_idx].lstrip())
+
+        # Find the line after the menu block ends. The block ends when we
+        # hit a non-blank, non-comment line whose indent is <= the menu's
+        # indent, OR when we run off the end of the label.
+        end_idx = label.range.end_line  # exclusive
+        insert_at = end_idx
+        for j in range(menu_idx + 1, end_idx):
+            line = file_lines[j]
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            indent = len(line) - len(line.lstrip())
+            if indent <= menu_indent:
+                insert_at = j
+                break
+
+        # Build the new branch lines. Choice header sits one BODY_INDENT
+        # deeper than the `menu:` keyword; choice body sits two deeper.
+        choice_indent = " " * (menu_indent + 4)
+        body_indent = " " * (menu_indent + 8)
+        prompt = text if raw else escape_dialogue(text)
+        quoted = quote(prompt)
+        header = f"{quoted} if {condition}:" if condition else f"{quoted}:"
+        new_lines = [f"{choice_indent}{header}"]
+        for body_line in body:
+            new_lines.append(f"{body_indent}{body_line}")
+
+        spliced = file_lines[:insert_at] + new_lines + file_lines[insert_at:]
+        new_text = "\n".join(spliced)
+        if text_content.endswith("\n"):
+            new_text += "\n"
+
+        return write_response(
+            config,
+            index,
+            rel,
+            new_text,
+            summary=f"appended choice `{text}` to menu in `{label_name}`",
+        )
+
+    return ToolDef(
+        name="add_menu_branch",
+        description=(
+            "Append a new branch to the FIRST top-level `menu:` block of a "
+            "label. Provide `text` (prompt, auto-escaped), optional `body` "
+            "(defaults to `[\"pass\"]`), optional `condition` (Python "
+            "expression gating the choice). Indentation is generated "
+            "automatically. Refuses if the label has no top-level menu — "
+            "call `add_menu` first to create one."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- redirect_jump ------------------------------------------------------
+
+
+_JUMP_LINE_RE = re.compile(r"^(\s*)jump\s+(\w+)\s*$")
+
+
+def _redirect_jump(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {
+        "type": "object",
+        "properties": {
+            "file": {
+                "type": "string",
+                "description": "POSIX path to the .rpy file containing the jump (relative to project root).",
+            },
+            "line": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "1-based line number of the `jump <target>` to rewrite.",
+            },
+            "new_target": {
+                "type": "string",
+                "description": "Replacement target label name. Must exist in the project.",
+            },
+        },
+        "required": ["file", "line", "new_target"],
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        rel: str = arguments["file"]
+        line_no: int = int(arguments["line"])
+        new_target: str = arguments["new_target"]
+
+        if not new_target.isidentifier():
+            return err(f"new_target `{new_target}` is not a valid Python identifier")
+
+        snap = index.snapshot()
+        if not any(l.name == new_target for l in snap.labels):
+            return err(f"no such label: {new_target}")
+
+        target_path = config.project_root / rel
+        if not target_path.is_file():
+            return err(f"file does not exist: {rel}")
+        text = target_path.read_text(encoding="utf-8")
+        file_lines = text.splitlines()
+        if line_no < 1 or line_no > len(file_lines):
+            return err(f"line {line_no} out of range for {rel}")
+
+        original = file_lines[line_no - 1]
+        m = _JUMP_LINE_RE.match(original)
+        if not m:
+            return err(
+                f"line {line_no} in {rel} is not a `jump <target>` statement: "
+                f"`{original.strip()}`"
+            )
+        indent, old_target = m.group(1), m.group(2)
+        if old_target == new_target:
+            # Idempotent — return a no-op response with the same shape as
+            # write_response so the caller doesn't have to special-case it.
+            return ok(
+                {
+                    "summary": f"jump at {rel}:{line_no} already targets `{new_target}`",
+                    "no_op": True,
+                    "file": rel,
+                    "diff": "",
+                    "warnings": [],
+                    "rpyc_cleaned": [],
+                }
+            )
+
+        file_lines[line_no - 1] = f"{indent}jump {new_target}"
+        new_text = "\n".join(file_lines)
+        if text.endswith("\n"):
+            new_text += "\n"
+
+        return write_response(
+            config,
+            index,
+            rel,
+            new_text,
+            summary=f"redirected jump at {rel}:{line_no} from `{old_target}` to `{new_target}`",
+        )
+
+    return ToolDef(
+        name="redirect_jump",
+        description=(
+            "Rewrite a single `jump <target>` statement at a specific (file, "
+            "line) to point at a new label. Use this when the Story Map drags "
+            "an edge to a different node, or when refactoring without "
+            "renaming. Refuses if the line isn't a `jump`, the new target "
+            "isn't a valid identifier, or the new target doesn't exist as a "
+            "label. No-op when the new target equals the old."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- delete_label -------------------------------------------------------
+
+
+def _delete_label(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {
+        "type": "object",
+        "properties": {
+            "label": {
+                "type": "string",
+                "description": "Name of the label to delete.",
+            },
+        },
+        "required": ["label"],
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        label_name: str = arguments["label"]
+        snap = index.snapshot()
+        label = find_single_label(snap.labels, label_name)
+        if isinstance(label, str):
+            return err(label)
+
+        # Find every incoming jump/call from OTHER labels. Any references
+        # block the delete — agents must rewire or remove them first so the
+        # project doesn't end up with dangling jumps.
+        references: list[dict[str, Any]] = []
+        for other in snap.labels:
+            if other.name == label_name:
+                continue
+            other_tree = parse_label_from_disk(config, other)
+            for stmt in iter_statements(other_tree["body"]):
+                if stmt["kind"] in ("jump", "call") and stmt["target"] == label_name:
+                    references.append(
+                        {
+                            "file": other.range.file,
+                            "line": stmt["line"],
+                            "label": other.name,
+                            "kind": stmt["kind"],
+                        }
+                    )
+        if references:
+            return err(
+                f"label `{label_name}` is still referenced from "
+                f"{len(references)} site(s); rewire or remove them first",
+                references=references,
+            )
+
+        # Splice out the label's lines (start_line..end_line, 1-based inclusive).
+        rel = label.range.file
+        text = (config.project_root / rel).read_text(encoding="utf-8")
+        file_lines = text.splitlines()
+        new_lines = (
+            file_lines[: label.range.start_line - 1] + file_lines[label.range.end_line :]
+        )
+        new_text = "\n".join(new_lines)
+        if text.endswith("\n") and not new_text.endswith("\n"):
+            new_text += "\n"
+
+        try:
+            result = apply_write(config, index, rel, new_text)
+        except WriteRejected as exc:
+            return err(str(exc))
+
+        warnings = list(result.warnings)
+        if label_name == "start":
+            warnings.append(
+                "deleted `label start:` — the project will not run until a "
+                "new start label is defined"
+            )
+
+        return ok(
+            {
+                "summary": f"deleted label `{label_name}` from `{rel}`",
+                "no_op": result.no_op,
+                "file": result.file,
+                "diff": result.diff,
+                "warnings": warnings,
+                "rpyc_cleaned": result.rpyc_cleaned,
+            }
+        )
+
+    return ToolDef(
+        name="delete_label",
+        description=(
+            "Remove an entire label block (header + body) from its `.rpy` "
+            "file. Refuses while the label is still reached by any "
+            "`jump`/`call` from another label — the error response carries "
+            "the list of references so the caller can rewire or remove them "
+            "first. Soft-warns when deleting `label start:` because the "
+            "project will not run until a new start is defined."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- event-stream tools (Phase 4) ---------------------------------------
+#
+# These tools all append a single line to a label's body via
+# `insert_into_label_body`, which handles indent + terminator-respect.
+# Each one owns one Ren'Py construct that the Scene Inspector renders as
+# its own event card.
+
+
+def _add_pause(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {
+        "type": "object",
+        "properties": {
+            "label": {"type": "string", "description": "Label whose body receives the pause."},
+            "duration": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Pause duration in seconds. 0 pauses for input.",
+            },
+        },
+        "required": ["label", "duration"],
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        label_name: str = arguments["label"]
+        duration = float(arguments["duration"])
+        if duration < 0:
+            return err("duration must be >= 0")
+        snap = index.snapshot()
+        label = find_single_label(snap.labels, label_name)
+        if isinstance(label, str):
+            return err(label)
+        line = f"pause {num_str(duration)}"
+        return insert_into_label_body(
+            config,
+            index,
+            label,
+            [line],
+            summary=f"appended `{line}` to `{label_name}`",
+        )
+
+    return ToolDef(
+        name="add_pause",
+        description=(
+            "Append a `pause <seconds>` statement to a label's body. Use to "
+            "give a beat between dialogue lines or hold a moment after a "
+            "transition. `duration: 0` waits for player input. The line is "
+            "indented and inserted before any trailing `jump`/`return`."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+def _add_setvar(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {
+        "type": "object",
+        "properties": {
+            "label": {"type": "string", "description": "Label whose body receives the assignment."},
+            "name": {
+                "type": "string",
+                "description": "Target variable name (Python identifier; dotted attrs not supported).",
+            },
+            "value": {
+                "description": (
+                    "Value to assign. Strings are quoted and escaped; "
+                    "bool/int/float/null are passed through verbatim."
+                ),
+            },
+        },
+        "required": ["label", "name", "value"],
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        label_name: str = arguments["label"]
+        name: str = arguments["name"]
+        value = arguments["value"]
+        if not isinstance(name, str) or not name.isidentifier():
+            return err(f"`{name}` is not a valid Python identifier")
+        if msg := reject_reserved_identifier(name):
+            return err(msg)
+        try:
+            rendered = _format_value_literal(value)
+        except ValueError as exc:
+            return err(str(exc))
+        snap = index.snapshot()
+        label = find_single_label(snap.labels, label_name)
+        if isinstance(label, str):
+            return err(label)
+        line = f"$ {name} = {rendered}"
+        return insert_into_label_body(
+            config,
+            index,
+            label,
+            [line],
+            summary=f"appended `{line}` to `{label_name}`",
+        )
+
+    return ToolDef(
+        name="add_setvar",
+        description=(
+            "Append `$ <name> = <value>` (an in-flow assignment) to a label's "
+            "body. Distinct from `set_variable_default`, which writes a "
+            "top-level `default <name> = <value>` declaration. Strings are "
+            "auto-quoted; bool/int/float/null are passed through. Use for "
+            "branching flags like `$ trust_mei += 1` after a dialogue line."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+def _add_show(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {
+        "type": "object",
+        "properties": {
+            "label": {"type": "string", "description": "Label whose body receives the show."},
+            "tag": {
+                "type": "string",
+                "description": "Image tag (typically a character name, e.g. `eileen`).",
+            },
+            "expression": {
+                "type": "string",
+                "description": "Optional expression / outfit (e.g. `happy`).",
+            },
+            "position": {
+                "type": "string",
+                "description": "Optional `at <position>` value (e.g. `left`, `center`).",
+            },
+            "transition": {
+                "type": "string",
+                "description": "Optional `with <transition>` value (e.g. `dissolve`).",
+            },
+        },
+        "required": ["label", "tag"],
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        label_name: str = arguments["label"]
+        tag: str = arguments["tag"]
+        expression: str | None = arguments.get("expression")
+        position: str | None = arguments.get("position")
+        transition: str | None = arguments.get("transition")
+        # Tag and expression must be Python-identifier-shaped to keep the
+        # show statement parseable; positions/transitions are looser
+        # (Ren'Py accepts callable expressions there).
+        if not tag.isidentifier():
+            return err(f"`{tag}` is not a valid image tag")
+        if expression and not all(part.isidentifier() for part in expression.split()):
+            return err(f"expression `{expression}` must be space-separated identifiers")
+        snap = index.snapshot()
+        label = find_single_label(snap.labels, label_name)
+        if isinstance(label, str):
+            return err(label)
+        parts = ["show", tag]
+        if expression:
+            parts.append(expression)
+        if position:
+            parts.append(f"at {position}")
+        if transition:
+            parts.append(f"with {transition}")
+        line = " ".join(parts)
+        return insert_into_label_body(
+            config,
+            index,
+            label,
+            [line],
+            summary=f"appended `{line}` to `{label_name}`",
+        )
+
+    return ToolDef(
+        name="add_show",
+        description=(
+            "Append a `show <tag> [<expression>] [at <position>] [with "
+            "<transition>]` statement to a label's body. Covers both the "
+            "'move character' and 'change expression' actions in the Scene "
+            "Inspector. Position and transition strings are passed through "
+            "verbatim so callable transitions (`Dissolve(0.5)`) work."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+def _add_with_effect(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {
+        "type": "object",
+        "properties": {
+            "label": {"type": "string", "description": "Label whose body receives the with-effect."},
+            "expression": {
+                "type": "string",
+                "description": (
+                    "Transition expression. Built-in atoms include `hpunch`, "
+                    "`vpunch`, `dissolve`, `fade`; callable forms like "
+                    "`Dissolve(0.5)` work too."
+                ),
+            },
+        },
+        "required": ["label", "expression"],
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        label_name: str = arguments["label"]
+        expression: str = arguments["expression"]
+        if not expression.strip():
+            return err("expression must be non-empty")
+        if msg := reject_multiline(expression):
+            return err(f"expression: {msg}")
+        snap = index.snapshot()
+        label = find_single_label(snap.labels, label_name)
+        if isinstance(label, str):
+            return err(label)
+        line = f"with {expression.strip()}"
+        return insert_into_label_body(
+            config,
+            index,
+            label,
+            [line],
+            summary=f"appended `{line}` to `{label_name}`",
+        )
+
+    return ToolDef(
+        name="add_with_effect",
+        description=(
+            "Append a `with <expression>` line — a screen-shake, fade, or "
+            "named transition. Pair with a preceding `show`/`scene`/`hide` "
+            "for the transition to actually apply. Built-in atoms (`hpunch`, "
+            "`dissolve`) and callable forms (`Dissolve(0.5)`) both work."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+_HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+
+def _add_flash(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {
+        "type": "object",
+        "properties": {
+            "label": {"type": "string", "description": "Label whose body receives the flash."},
+            "color": {
+                "type": "string",
+                "description": "CSS-style hex color, e.g. `#ffffff` or `#fff`.",
+            },
+            "duration": {
+                "type": "number",
+                "default": 0.25,
+                "minimum": 0,
+                "description": "Total fade-out + fade-in time (seconds). Defaults to 0.25.",
+            },
+        },
+        "required": ["label", "color"],
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        label_name: str = arguments["label"]
+        color: str = arguments["color"]
+        duration = float(arguments.get("duration", 0.25))
+        if duration < 0:
+            return err("duration must be >= 0")
+        if not _HEX_COLOR_RE.match(color):
+            return err(f"color `{color}` must be a hex string like `#ffffff` or `#fff`")
+        snap = index.snapshot()
+        label = find_single_label(snap.labels, label_name)
+        if isinstance(label, str):
+            return err(label)
+        # Half the budget fades to color, half fades back. Hold time stays 0
+        # so the flash reads as a momentary pulse, not a screen wash.
+        half = num_str(duration / 2)
+        line = f'with Fade({half}, 0.0, {half}, color="{color}")'
+        return insert_into_label_body(
+            config,
+            index,
+            label,
+            [line],
+            summary=f"appended {line} to `{label_name}`",
+        )
+
+    return ToolDef(
+        name="add_flash",
+        description=(
+            "Append a momentary color flash via Ren'Py's `Fade` transition. "
+            "Emits `with Fade(<dur/2>, 0.0, <dur/2>, color=\"<hex>\")` so the "
+            "screen pulses to the color and back. Color must be a CSS hex "
+            "(`#ffffff` or `#fff`)."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+def _format_value_literal(value: Any) -> str:
+    """Render a JSON value as a Ren'Py expression (mirrors warp_to overrides)."""
+    if value is None:
+        return "None"
+    if isinstance(value, bool):
+        return "True" if value else "False"
+    if isinstance(value, (int, float)):
+        return num_str(float(value))
+    if isinstance(value, str):
+        return quote(value)
+    raise ValueError(
+        f"unsupported value type: {type(value).__name__}; "
+        "must be string, int, float, bool, or null"
     )
 
 

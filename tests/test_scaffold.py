@@ -54,3 +54,33 @@ def test_scaffold_prefers_sdk_template_when_available(tmp_path: Path):
     assert "sentinel from fake SDK template" in (proj / "game" / "script.rpy").read_text()
     # testcases.rpy is deliberately skipped — it's the SDK's test-harness template.
     assert not (proj / "game" / "testcases.rpy").exists()
+
+
+def test_scaffold_rewrites_config_and_build_name(tmp_path: Path):
+    """SDK template ships with `build.name = "gui"`; scaffold must rewrite
+    both config.name AND build.name so distribute artifacts pick up the
+    actual project name (not the SDK launcher's name). build.name must
+    be slug-safe so `build.directory_name` (which derives from it) doesn't
+    contain spaces/colons/semicolons that Ren'Py distribute rejects.
+    """
+    fake_sdk = tmp_path / "fake_sdk"
+    template = fake_sdk / "gui" / "game"
+    template.mkdir(parents=True)
+    (template / "script.rpy").write_text("label start:\n    return\n")
+    (template / "options.rpy").write_text(
+        '## options.rpy template\n'
+        'define config.name = _("My Game")\n'
+        'define config.version = "1.0"\n'
+        'define build.name = "gui"\n'
+    )
+
+    # display_name with a space — config.name keeps it, build.name slugifies.
+    proj = tmp_path / "shipping_test"
+    scaffold_project(proj, display_name="Pirate Tale", sdk_root=fake_sdk)
+    options = (proj / "game" / "options.rpy").read_text()
+    assert 'define config.name = _("Pirate Tale")' in options
+    # build.name must be slug-safe — Ren'Py distribute crashes on
+    # `build.directory_name` containing spaces.
+    assert 'define build.name = "pirate_tale"' in options
+    assert 'build.name = "Pirate Tale"' not in options
+    assert 'build.name = "gui"' not in options

@@ -52,9 +52,23 @@ you're about to change something and want to understand the invariants first.
 1. **Every mutation goes through `apply_write`.** No tool writes bytes
    directly. This is how path containment, label uniqueness, indent
    normalization, atomic writes, `.rpyc` cleanup, and the returned unified
-   diff stay uniform across every tier. The one exception is
-   `new_project` (§1a), which creates files before the project exists —
-   no prior index to collide with and no `.rpy` to diff against.
+   diff stay uniform across every tier. Three exceptions, all intentional:
+   - `new_project` (§1a) — creates files before the project exists, so
+     there is no prior index to collide with and no `.rpy` to diff against.
+   - `set_canvas_positions` (`project/canvas.py`) and
+     `set_ignored_diagnostics` (`project/diagnostics.py`) — both write
+     editor-metadata sidecars under `.renpy-mcp/`. Neither sidecar is
+     Ren'Py syntax: Ren'Py never reads them, `ProjectIndex` does not
+     index them, and `apply_write`'s guarantees (label uniqueness, indent
+     normalization, `.rpyc` cleanup, unified-diff generation, index
+     refresh) are either irrelevant or counterproductive. The modules
+     mirror the bits we still want — path containment, atomic write,
+     no-op detection.
+   - `generate_translation_scaffolding` (`tools/lifecycle.py`) — Ren'Py
+     itself writes the new `game/tl/<language>/*.rpy` files via the
+     `translate` SDK command. Same shape as `new_project`: the SDK is
+     authoritative, our writer is bypassed, and we refresh the index
+     after the fact so subsequent reads pick up the new files.
 2. **The file system is the integration point.** The GUI and LLM harnesses
    each spawn their own `renpy-mcp` subprocess; they don't talk to each
    other. Coordination is implicit through the project files plus the

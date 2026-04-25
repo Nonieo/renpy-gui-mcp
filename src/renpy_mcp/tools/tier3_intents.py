@@ -17,6 +17,12 @@ import mcp.types as types
 from ..config import DEFAULT_GAMES_SUBDIR, ServerConfig
 from ..guardrails.dialogue import escape_dialogue, reject_multiline
 from ..guardrails.reserved import reject_reserved_identifier
+from ..project.composers import (
+    CompositionError,
+    generate_imagemap,
+    generate_screen_layout,
+    generate_stage,
+)
 from ..project.scaffold import scaffold_project, slugify
 from ..project.scanner import LabelInfo, ProjectIndex
 from ..project.writer import WriteRejected, apply_write
@@ -50,6 +56,9 @@ def register(registry: ToolRegistry, config: ServerConfig, index: ProjectIndex) 
     registry.add(_add_condition_branch(config, index))
     registry.add(_add_inventory_item_scaffold(config, index))
     registry.add(_add_minigame_screen_scaffold(config, index))
+    registry.add(_add_screen_layout(config, index))
+    registry.add(_add_stage(config, index))
+    registry.add(_add_imagemap(config, index))
 
 
 # ---------- new_project ---------------------------------------------------------
@@ -143,8 +152,10 @@ def _create_scene(config: ServerConfig, index: ProjectIndex) -> ToolDef:
             "background": {
                 "type": "string",
                 "description": (
-                    "Image name to show with `scene` (e.g. `bg park`). Must "
-                    "already be defined or auto-named in `game/images/`."
+                    "Image name to show with `scene` (e.g. `bg park`). The "
+                    "tool does NOT verify the image exists; missing assets "
+                    "surface as lint warnings (and can be auto-faked via "
+                    "`set_drafting_mode`)."
                 ),
             },
             "music": {
@@ -1023,6 +1034,314 @@ def _add_minigame_screen_scaffold(config: ServerConfig, index: ProjectIndex) -> 
             "`label <name>_play` that calls the screen and jumps to "
             "`on_complete_label`. The screen body is meant to be replaced with "
             "real gameplay; the label wiring is production-shaped."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- add_screen_layout (composer, Phase 7) ------------------------------
+
+
+def _add_screen_layout(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    """Compose a complete `screen <name>():` block from a typed widget tree.
+
+    The visual Composer panel calls this through a thin REST endpoint;
+    agents call it directly with the same tree shape. Either way, the
+    pure generator in `project/composers.py` produces the source text
+    and `apply_write` lands it.
+    """
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Screen name (Python identifier; not already declared).",
+            },
+            "root": {
+                "type": "object",
+                "description": (
+                    "Root widget node. Recursive shape: containers "
+                    "(`vbox`/`hbox`/`frame`) carry `children`; `text`/"
+                    "`textbutton` carry strings; `button` carries `action` "
+                    "and `children`; `spacer` carries `height` and/or "
+                    "`width`. Optional `props` on any node become indented "
+                    "body lines (e.g. `xalign 0.5`)."
+                ),
+            },
+            "file": {
+                "type": "string",
+                "description": (
+                    "Target .rpy file. Defaults to `game/screens.rpy`."
+                ),
+            },
+        },
+        "required": ["name", "root"],
+        "additionalProperties": False,
+    }
+
+    DEFAULT_SCREEN_FILE = "game/screens.rpy"
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        name: str = arguments["name"]
+        root = arguments["root"]
+        rel_file: str = arguments.get("file") or DEFAULT_SCREEN_FILE
+
+        if msg := reject_reserved_identifier(name):
+            return err(msg)
+
+        snap = index.snapshot()
+        if any(s.name == name for s in snap.screens):
+            existing = next(s for s in snap.screens if s.name == name)
+            return err(
+                f"screen `{name}` already exists",
+                existing={"file": existing.range.file, "line": existing.range.start_line},
+            )
+
+        try:
+            generated = generate_screen_layout(name, root)
+        except CompositionError as exc:
+            return err(str(exc))
+
+        target = config.project_root / rel_file
+        original = target.read_text(encoding="utf-8") if target.is_file() else ""
+        new_text = append_block(original, generated.splitlines())
+        return write_response(
+            config,
+            index,
+            rel_file,
+            new_text,
+            summary=f"composed screen `{name}` in `{rel_file}`",
+        )
+
+    return ToolDef(
+        name="add_screen_layout",
+        description=(
+            "Compose a complete `screen <name>():` block from a typed "
+            "widget tree and append it to the target .rpy file (default "
+            "`game/screens.rpy`). Tree node kinds: `vbox` / `hbox` / "
+            "`frame` (containers, take `children`), `text` (takes `text`), "
+            "`textbutton` (takes `text` + `action`), `button` (takes "
+            "`action` + `children`), `spacer` (takes `height` and/or "
+            "`width`). Every node accepts an optional `props` map of "
+            "screen-language properties (e.g. `xalign`, `spacing`); "
+            "string property values are auto-quoted. Refuses if a screen "
+            "by that name already exists."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- add_stage (composer, Phase 7) --------------------------------------
+
+
+def _add_stage(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    """Compose a multi-sprite stage setup inside an existing label.
+
+    Produces one `scene <bg>` line, N `show <tag> [<expr>] [at <pos>]`
+    lines, and an optional trailing `with <transition>`. This is the
+    "Stage Composer" entry from Phase 7 — renamed from "Scene Composer"
+    so the tool name doesn't collide with `create_scene` (which authors
+    a brand-new scene LABEL).
+    """
+    schema = {
+        "type": "object",
+        "properties": {
+            "label": {
+                "type": "string",
+                "description": "Existing label whose body receives the stage.",
+            },
+            "background": {
+                "type": "string",
+                "description": (
+                    "Image name for the `scene` line (e.g. `bg park`). "
+                    "Optional when at least one sprite is provided. Not "
+                    "validated against the image index — missing assets "
+                    "surface as lint warnings."
+                ),
+            },
+            "sprites": {
+                "type": "array",
+                "description": (
+                    "List of sprite show statements. Each entry: "
+                    "`{tag, expression?, position?}`. `tag` and `expression` "
+                    "must be Python identifiers (or space-separated ones for "
+                    "expression)."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "tag": {"type": "string"},
+                        "expression": {"type": "string"},
+                        "position": {"type": "string"},
+                    },
+                    "required": ["tag"],
+                    "additionalProperties": False,
+                },
+            },
+            "transition": {
+                "type": "string",
+                "description": (
+                    "Optional `with <transition>` line emitted after the "
+                    "show statements (e.g. `dissolve`, `Dissolve(0.5)`)."
+                ),
+            },
+        },
+        "required": ["label"],
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        label_name: str = arguments["label"]
+        background: str | None = arguments.get("background")
+        sprites: list[dict[str, Any]] = arguments.get("sprites") or []
+        transition: str | None = arguments.get("transition")
+
+        snap = index.snapshot()
+        label = find_single_label(snap.labels, label_name)
+        if isinstance(label, str):
+            return err(label)
+
+        try:
+            body_lines = generate_stage(
+                background=background,
+                sprites=sprites,
+                transition=transition,
+            )
+        except CompositionError as exc:
+            return err(str(exc))
+
+        return insert_into_label_body(
+            config,
+            index,
+            label,
+            body_lines,
+            summary=(
+                f"composed stage on `{label_name}` "
+                f"({1 if background else 0} bg + {len(sprites)} sprite(s)"
+                f"{' + transition' if transition else ''})"
+            ),
+        )
+
+    return ToolDef(
+        name="add_stage",
+        description=(
+            "Compose a multi-sprite stage inside an existing label: "
+            "appends one `scene <background>` (when given), N `show <tag> "
+            "[<expression>] [at <position>]` lines (one per sprite), and "
+            "an optional `with <transition>` to wrap them. Use this when "
+            "an `add_show` for each sprite would be repetitive. The label "
+            "must exist; provide at least a background or one sprite."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- add_imagemap (composer, Phase 7) -----------------------------------
+
+
+def _add_imagemap(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    """Compose an `imagemap:` screen block — ground/hover images plus
+    rect-defined hotspots bound to actions.
+    """
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Screen name (Python identifier; not already declared).",
+            },
+            "ground": {
+                "type": "string",
+                "description": "Path to the idle (un-hovered) image.",
+            },
+            "hover": {
+                "type": "string",
+                "description": "Path to the hovered image.",
+            },
+            "hotspots": {
+                "type": "array",
+                "minItems": 1,
+                "description": (
+                    "List of hotspot rectangles: "
+                    "`[{x, y, w, h, action}, ...]`. Coordinates are "
+                    "numeric pixels relative to the ground image. `action` "
+                    "is the Ren'Py screen-language action expression "
+                    "(e.g. `Jump(\"cafe_scene\")`, `Return()`)."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "x": {"type": "number"},
+                        "y": {"type": "number"},
+                        "w": {"type": "number"},
+                        "h": {"type": "number"},
+                        "action": {"type": "string"},
+                    },
+                    "required": ["x", "y", "w", "h", "action"],
+                    "additionalProperties": False,
+                },
+            },
+            "file": {
+                "type": "string",
+                "description": "Target .rpy file. Defaults to `game/screens.rpy`.",
+            },
+        },
+        "required": ["name", "ground", "hover", "hotspots"],
+        "additionalProperties": False,
+    }
+
+    DEFAULT_SCREEN_FILE = "game/screens.rpy"
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        name: str = arguments["name"]
+        ground: str = arguments["ground"]
+        hover: str = arguments["hover"]
+        hotspots: list[dict[str, Any]] = arguments["hotspots"]
+        rel_file: str = arguments.get("file") or DEFAULT_SCREEN_FILE
+
+        if msg := reject_reserved_identifier(name):
+            return err(msg)
+
+        snap = index.snapshot()
+        if any(s.name == name for s in snap.screens):
+            existing = next(s for s in snap.screens if s.name == name)
+            return err(
+                f"screen `{name}` already exists",
+                existing={"file": existing.range.file, "line": existing.range.start_line},
+            )
+
+        try:
+            generated = generate_imagemap(name, ground, hover, hotspots)
+        except CompositionError as exc:
+            return err(str(exc))
+
+        target = config.project_root / rel_file
+        original = target.read_text(encoding="utf-8") if target.is_file() else ""
+        new_text = append_block(original, generated.splitlines())
+        return write_response(
+            config,
+            index,
+            rel_file,
+            new_text,
+            summary=(
+                f"composed imagemap `{name}` with {len(hotspots)} hotspot(s) "
+                f"in `{rel_file}`"
+            ),
+        )
+
+    return ToolDef(
+        name="add_imagemap",
+        description=(
+            "Compose a `screen <name>():` block whose body is a single "
+            "`imagemap:` definition: a ground image, a hover image, and a "
+            "list of `hotspot (x y w h) action <expr>` rectangles. Each "
+            "hotspot binds a click rectangle on the ground image to a "
+            "screen-language action (`Jump(\"label\")`, `Return()`, etc.). "
+            "Refuses if a screen by that name already exists; appends to "
+            "`game/screens.rpy` by default."
         ),
         input_schema=schema,
         handler=handler,
