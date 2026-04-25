@@ -431,6 +431,10 @@ def build_app(project_root: Path, sdk_root: Path, static_dir: Path | None = None
             "add_screen_layout", body.model_dump(exclude_none=True)
         )
 
+    @app.post("/api/scaffold/repair")
+    async def repair_scaffold() -> Any:
+        return await state.client.call("repair_scaffold")
+
     @app.post("/api/composers/stage")
     async def composer_stage(body: StageBody = Body(...)) -> Any:
         return await state.client.call("add_stage", body.model_dump(exclude_none=True))

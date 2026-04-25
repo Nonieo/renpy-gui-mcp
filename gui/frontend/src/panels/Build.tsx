@@ -8,8 +8,24 @@ import {
   RefreshCw,
   Terminal,
   Download,
+  Wrench,
 } from "lucide-react";
 import { api } from "@/api/client";
+
+interface ScaffoldIssue {
+  rule: string;
+  severity: "error" | "warning";
+  file: string | null;
+  message: string;
+  fix_summary: string;
+}
+
+interface RepairAction {
+  rule: string;
+  outcome: string;
+  file?: string;
+  error?: string;
+}
 
 interface LintReport {
   returncode: number;
@@ -202,8 +218,14 @@ function DistributeSection() {
     artifacts?: string[];
     destination?: string | null;
     default_destination?: string;
+    scaffold_warnings?: ScaffoldIssue[];
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [repairing, setRepairing] = useState(false);
+  const [repairOutcome, setRepairOutcome] = useState<{
+    summary: string;
+    actions: RepairAction[];
+  } | null>(null);
 
   const PLATFORMS: { id: string; label: string; hint: string }[] = [
     { id: "pc", label: "PC", hint: "Windows + Linux zip" },
@@ -224,6 +246,7 @@ function DistributeSection() {
     setRunning(true);
     setError(null);
     setReport(null);
+    setRepairOutcome(null);
     try {
       const body: Record<string, unknown> = { targets: selected };
       if (destination.trim()) body.destination = destination.trim();
@@ -235,6 +258,7 @@ function DistributeSection() {
         artifacts?: string[];
         destination?: string | null;
         default_destination?: string;
+        scaffold_warnings?: ScaffoldIssue[];
         error?: string;
       }>("/api/build/distribute", { method: "POST", json: body });
       if (data.error) {
@@ -248,12 +272,44 @@ function DistributeSection() {
           artifacts: data.artifacts ?? [],
           destination: data.destination ?? null,
           default_destination: data.default_destination,
+          scaffold_warnings: data.scaffold_warnings ?? [],
         });
       }
     } catch (err) {
       setError(String(err));
     } finally {
       setRunning(false);
+    }
+  };
+
+  const runRepair = async () => {
+    if (repairing) return;
+    setRepairing(true);
+    setRepairOutcome(null);
+    try {
+      const data = await api<{
+        summary?: string;
+        actions?: RepairAction[];
+        issues?: ScaffoldIssue[];
+        error?: string;
+      }>("/api/scaffold/repair", { method: "POST" });
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setRepairOutcome({
+          summary: data.summary ?? "(no summary)",
+          actions: data.actions ?? [],
+        });
+        // Clear remembered warnings — the next build will report fresh
+        // ones if anything is still wrong.
+        setReport((prev) =>
+          prev ? { ...prev, scaffold_warnings: [] } : prev
+        );
+      }
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setRepairing(false);
     }
   };
 
@@ -330,6 +386,16 @@ function DistributeSection() {
 
       {report && (
         <div className="space-y-3">
+          {report.scaffold_warnings && report.scaffold_warnings.length > 0 && (
+            <ScaffoldWarningsCard
+              warnings={report.scaffold_warnings}
+              onRepair={runRepair}
+              repairing={repairing}
+            />
+          )}
+          {repairOutcome && (
+            <RepairOutcomeCard outcome={repairOutcome} />
+          )}
           {report.artifacts && report.artifacts.length > 0 && (
             <div className="border border-emerald-200 bg-emerald-50 rounded p-3 text-xs">
               <div className="mb-1.5">
@@ -455,6 +521,97 @@ function FindingRow({ finding }: { finding: ParsedFinding }) {
         </div>
         <div className="text-zinc-800">{finding.message}</div>
       </div>
+    </div>
+  );
+}
+
+function ScaffoldWarningsCard({
+  warnings,
+  onRepair,
+  repairing,
+}: {
+  warnings: ScaffoldIssue[];
+  onRepair: () => void;
+  repairing: boolean;
+}) {
+  return (
+    <div className="border border-amber-300 bg-amber-50 rounded p-3 text-xs">
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div className="flex items-start gap-2 min-w-0">
+          <AlertTriangle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <strong className="text-amber-900 block">
+              {warnings.length} scaffold warning
+              {warnings.length === 1 ? "" : "s"}
+            </strong>
+            <span className="text-amber-700">
+              These template leftovers can pass lint but break the built
+              game at startup.
+            </span>
+          </div>
+        </div>
+        <button
+          onClick={onRepair}
+          disabled={repairing}
+          className="px-2.5 py-1 rounded bg-amber-700 text-white text-xs disabled:opacity-50 inline-flex items-center gap-1.5 flex-shrink-0"
+        >
+          <Wrench className={repairing ? "w-3.5 h-3.5 animate-spin" : "w-3.5 h-3.5"} />
+          {repairing ? "Repairing…" : "Repair scaffold"}
+        </button>
+      </div>
+      <ul className="space-y-1.5 ml-6">
+        {warnings.map((w) => (
+          <li key={w.rule}>
+            <div className="font-mono text-amber-800">
+              {w.rule}
+              {w.file && (
+                <span className="text-amber-600"> · {w.file}</span>
+              )}
+            </div>
+            <div className="text-amber-900">{w.message}</div>
+            <div className="text-amber-700 italic">Fix: {w.fix_summary}</div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function RepairOutcomeCard({
+  outcome,
+}: {
+  outcome: { summary: string; actions: RepairAction[] };
+}) {
+  const hasErrors = outcome.actions.some((a) => a.outcome === "error");
+  const cls = hasErrors
+    ? "border-red-200 bg-red-50 text-red-800"
+    : "border-emerald-200 bg-emerald-50 text-emerald-800";
+  return (
+    <div className={`border rounded p-3 text-xs ${cls}`}>
+      <div className="flex items-start gap-2 mb-1.5">
+        {hasErrors ? (
+          <AlertOctagon className="w-4 h-4 flex-shrink-0 mt-0.5" />
+        ) : (
+          <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
+        )}
+        <strong>{outcome.summary}</strong>
+      </div>
+      {outcome.actions.length > 0 && (
+        <ul className="ml-6 space-y-0.5 font-mono">
+          {outcome.actions.map((a, i) => (
+            <li key={i}>
+              <span className="opacity-60">{a.outcome}</span> · {a.rule}
+              {a.file && <span className="opacity-60"> · {a.file}</span>}
+              {a.error && <span className="text-red-700"> — {a.error}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!hasErrors && outcome.actions.length > 0 && (
+        <p className="mt-2 ml-6 not-italic">
+          Re-run the build to produce a clean artifact.
+        </p>
+      )}
     </div>
   );
 }

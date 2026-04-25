@@ -96,6 +96,12 @@ def scaffold_project(
         # Tweak options.rpy's config.name in-place so the title bar reads
         # the chosen display name, not the SDK's default placeholder.
         _rename_in_options(game / "options.rpy", display_name or root.name)
+        # Replace the SDK template's `guisupport.rpy` with the slim
+        # version that drops the launcher-only `gui7` import. Without
+        # this step, every new project lints and previews fine but
+        # crashes at startup as soon as it's distributed. See
+        # project/scaffold_health.py for the full story.
+        _slim_guisupport(game / "guisupport.rpy")
         return f"scaffolded {root} from SDK template"
 
     (game / "script.rpy").write_text(_MIN_SCRIPT_RPY, encoding="utf-8")
@@ -131,6 +137,20 @@ _BUILD_NAME_RE = re.compile(
     r"""^(?P<prefix>define\s+build\.name\s*=\s*)"[^"]*"(?P<suffix>.*)$""",
     re.MULTILINE,
 )
+
+
+def _slim_guisupport(target: Path) -> None:
+    """Overwrite (or create) `game/guisupport.rpy` with the minimum the
+    SDK-shipped `gui.rpy` actually needs — the `gui.scale` helper at
+    `init -100`. Drops the launcher-only `gui7` regen block that
+    crashes built distributions.
+    """
+    # Late import: scaffold_health imports from this module too, so the
+    # shared MIN_GUISUPPORT constant lives there. Defer to avoid a
+    # circular-import at module load.
+    from .scaffold_health import MIN_GUISUPPORT
+
+    target.write_text(MIN_GUISUPPORT, encoding="utf-8")
 
 
 def _rename_in_options(options_path: Path, new_name: str) -> None:

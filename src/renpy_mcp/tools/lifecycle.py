@@ -32,6 +32,7 @@ import mcp.types as types
 from .. import sdk as renpy_sdk
 from ..config import ServerConfig, sdk_launcher_name
 from ..project.asset_refs import collect_missing_image_refs
+from ..project import scaffold_health
 from ..project.scanner import ProjectIndex
 from ..project.writer import WriteRejected, apply_write, delete_file
 from ._shared import quote
@@ -640,6 +641,21 @@ def _build_distribution(config: ServerConfig) -> ToolDef:
                 except OSError:
                     continue
 
+        # Scaffold-health pre-flight: a guisupport.rpy that imports
+        # `gui7` will crash the artifact at startup even though lint and
+        # the build itself succeed. Surface those issues so the user
+        # knows BEFORE they try to run the artifact.
+        scaffold_issues = [
+            {
+                "rule": i.rule,
+                "severity": i.severity,
+                "file": i.file,
+                "message": i.message,
+                "fix_summary": i.fix_summary,
+            }
+            for i in scaffold_health.diagnose(config)
+        ]
+
         return _ok(
             {
                 "targets": cleaned,
@@ -651,6 +667,7 @@ def _build_distribution(config: ServerConfig) -> ToolDef:
                 "returncode": result.returncode,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
+                "scaffold_warnings": scaffold_issues,
             }
         )
 

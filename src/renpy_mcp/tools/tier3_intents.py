@@ -23,6 +23,7 @@ from ..project.composers import (
     generate_screen_layout,
     generate_stage,
 )
+from ..project import scaffold_health
 from ..project.scaffold import scaffold_project, slugify
 from ..project.scanner import LabelInfo, ProjectIndex
 from ..project.writer import WriteRejected, apply_write
@@ -59,6 +60,7 @@ def register(registry: ToolRegistry, config: ServerConfig, index: ProjectIndex) 
     registry.add(_add_screen_layout(config, index))
     registry.add(_add_stage(config, index))
     registry.add(_add_imagemap(config, index))
+    registry.add(_repair_scaffold(config, index))
 
 
 # ---------- new_project ---------------------------------------------------------
@@ -1342,6 +1344,56 @@ def _add_imagemap(config: ServerConfig, index: ProjectIndex) -> ToolDef:
             "screen-language action (`Jump(\"label\")`, `Return()`, etc.). "
             "Refuses if a screen by that name already exists; appends to "
             "`game/screens.rpy` by default."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- repair_scaffold (post-SDK-template cleanup) ------------------------
+
+
+def _repair_scaffold(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    """Fix known-broken-on-distribution scaffold leftovers.
+
+    Two specific patterns are detected and repaired:
+    `game/guisupport.rpy` importing `gui7` (crashes built distributions
+    even when lint passes), and `build.name = "gui"` in `options.rpy`
+    (misnames every distributed artifact). See
+    `project/scaffold_health.py` for the full story.
+
+    Idempotent — running on a clean project returns an empty action list.
+    """
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def handler(_arguments: dict[str, Any]) -> list[types.TextContent]:
+        try:
+            report = scaffold_health.repair(config, index)
+        except Exception as exc:  # noqa: BLE001 — surface as structured error
+            return err(f"repair_scaffold failed: {exc}")
+        n = len(report["actions"])
+        return ok(
+            {
+                "summary": (
+                    "scaffold is clean"
+                    if not report["issues"]
+                    else f"applied {n} repair(s)"
+                ),
+                **report,
+            }
+        )
+
+    return ToolDef(
+        name="repair_scaffold",
+        description=(
+            "Fix known scaffold issues that pass lint but break "
+            "distributed builds. Currently: removes "
+            "`game/guisupport.rpy` when it imports the launcher-only "
+            "`gui7` module (the cause of `ModuleNotFoundError: gui7` "
+            "at startup in built games), and rewrites `build.name = "
+            "\"gui\"` in `options.rpy` to a slug derived from "
+            "`config.name` so artifacts get named correctly. Safe to "
+            "call on a clean project — returns an empty action list."
         ),
         input_schema=schema,
         handler=handler,
