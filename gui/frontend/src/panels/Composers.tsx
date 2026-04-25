@@ -1,20 +1,24 @@
 /**
- * Composers — visual code generators (Phase 7).
- *
- * The Composers panel hosts one section per Tier 3 composer tool. The
- * Screen Layout section is the first to land; the others (Scene,
- * ImageMap, Menu) are tracked stubs until they ship.
+ * Composer components — typed-tree visual generators.
  *
  * Each composer takes a typed JSON tree and emits a single Ren'Py
- * construct. The tree is the source of truth — agents can call the
- * tool directly with the same shape the panel posts. The panel
- * surfaces a starter template and a result pane so authors can iterate
- * visually without leaving the GUI.
+ * construct via its matching MCP tool. The components used to live in
+ * a single "Composers" left-rail panel; Phase 2 split them across
+ * their natural homes:
+ *
+ *   - ScreenLayoutComposer  → Library > Screens tab
+ *   - ImageMapComposer      → Library > Screens tab
+ *   - StageComposer         → Inspector > Insert event > Stage
+ *   - MenuComposer          → Inspector > Insert event > Menu
+ *
+ * They're exported individually so the new homes can render them
+ * directly. Internal helpers (ComposerSection / FieldLabel /
+ * ComposerActions / ComposerOutcome) stay file-local.
  */
 
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Layers, Wand2, FileText, ImageIcon, GitBranch, Plus, X } from "lucide-react";
+import { Layers, FileText, ImageIcon, GitBranch, Plus, X } from "lucide-react";
 import { api } from "@/api/client";
 import type { LabelInfo } from "@/api/types";
 
@@ -26,33 +30,6 @@ const SCREEN_LAYOUT_STARTER = `{
     { "kind": "textbutton", "text": "Continue", "action": "Return()" }
   ]
 }`;
-
-export function Composers() {
-  return (
-    <div className="w-full h-full overflow-auto bg-canvas">
-      <div className="max-w-3xl mx-auto px-6 py-8 space-y-8">
-        <header className="border-b border-line pb-3">
-          <span className="text-[10px] uppercase tracking-wide text-ink3 font-mono">
-            Visual generators
-          </span>
-          <h1 className="font-serif text-2xl text-ink mt-1 flex items-center gap-2">
-            <Wand2 className="w-5 h-5" />
-            Composers
-          </h1>
-          <p className="text-xs text-ink3 mt-1">
-            One Tier 3 tool per composer. Each accepts a typed JSON tree and
-            appends the generated Ren'Py construct to your project.
-          </p>
-        </header>
-
-        <ScreenLayoutComposer />
-        <StageComposer />
-        <ImageMapComposer />
-        <MenuComposer />
-      </div>
-    </div>
-  );
-}
 
 export function ScreenLayoutComposer() {
   const [name, setName] = useState("");
