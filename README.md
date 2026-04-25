@@ -104,12 +104,19 @@ build ships with the wheel):
 
 ```bash
 git clone https://github.com/fracturedring/renpy-mcp && cd renpy-mcp
-pip install -e ".[gui]"
-gui/run.sh /path/to/your/renpy/project /path/to/renpy-sdk
+gui/launch.sh                       # creates .venv, installs deps,
+                                    # builds frontend, opens launcher
 ```
 
-`gui/run.sh` builds the frontend on first run, then serves the SPA +
-API on `http://127.0.0.1:8765/` from one FastAPI process.
+`gui/launch.sh` opens a small **launcher window** that asks for the
+Ren'Py SDK folder and a project. Both selections are remembered in
+`~/.config/renpy-mcp/launcher.json` (or `%APPDATA%` on Windows), so
+subsequent launches are one click. After install you can also run
+`rpbuilder` directly from the activated venv — same launcher.
+
+Headless? Pass `--terminal` (or set `RPBUILDER_TERMINAL=1`) for a
+text-prompt version. For the bare server without the launcher, the
+older `gui/run.sh /path/to/project /path/to/sdk` still works.
 
 ---
 

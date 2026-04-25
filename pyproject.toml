@@ -42,6 +42,7 @@ gui = [
 [project.scripts]
 renpy-mcp = "renpy_mcp.__main__:main"
 renpy-mcp-gui = "renpy_mcp_gui.__main__:main"
+rpbuilder = "renpy_mcp_gui.launcher:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/renpy_mcp", "gui/backend/src/renpy_mcp_gui"]

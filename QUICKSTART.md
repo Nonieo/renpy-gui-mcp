@@ -75,21 +75,45 @@ The `.venv` is an isolated Python environment — like a workspace just
 for this project. `pip install -e ".[gui]"` pulls in everything
 renpy-mcp needs, plus the GUI server.
 
-### Step 3 — Run the editor
+### Step 3 — Run the launcher
 
 ```bash
-gui/run.sh /path/to/where/you/keep/projects /path/to/your/renpy-sdk
+gui/launch.sh
 ```
 
-Replace `/path/to/where/you/keep/projects` with any folder where you
-want your VN projects to live. Replace `/path/to/your/renpy-sdk` with
-the path to the Ren'Py SDK you downloaded (it's the folder named
-something like `renpy-8.4.2-sdk` after you extract it).
+That script:
 
-The first run takes a couple of minutes — it builds the GUI's frontend
-once, then caches it. Subsequent runs are quick.
+1. Creates the Python virtualenv if it's missing.
+2. Installs `renpy-mcp[gui]` if it's missing.
+3. Builds the editor's frontend if it's missing (one-time, needs `npm`).
+4. Opens **the launcher window**, which asks you for the Ren'Py SDK
+   folder and the project folder. Both choices are remembered for next
+   time, so subsequent launches are one click.
 
-When it finishes, open your browser to **http://127.0.0.1:8765/**.
+If you'd rather skip the wrapper, after `pip install -e ".[gui]"` you
+can also run `rpbuilder` directly from the activated venv — the
+launcher window is the same.
+
+#### What the launcher looks like
+
+| | |
+|---|---|
+| **Ren'Py SDK** | Browse to the folder named something like `renpy-8.4.2-sdk` (it contains a `renpy.sh` or `renpy.exe`). The launcher validates and shows a green check when it finds one. |
+| **Project** | Pick from your recent projects, browse to an existing one, or click *New project* to create an empty one. The launcher creates the bare `game/script.rpy` so the editor has something to bind to; you'll fill it in from the editor. |
+| **Launch RPBuilder** | Spawns the editor server, opens it in your browser at <http://127.0.0.1:8765>, and dismisses the launcher. Closing the editor window stops the server. |
+
+Where the launcher remembers your choices:
+
+- Linux/macOS: `~/.config/renpy-mcp/launcher.json`
+- Windows: `%APPDATA%\renpy-mcp\launcher.json`
+
+Plain JSON — edit it by hand if you ever need to.
+
+#### Headless or no GUI toolkit?
+
+Run with `--terminal` (or `RPBUILDER_TERMINAL=1`) for a text-prompt
+version of the same flow. The launcher also auto-falls-back to text
+mode when no display is available.
 
 ### Step 4 — Make something
 
