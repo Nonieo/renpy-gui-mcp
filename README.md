@@ -23,8 +23,15 @@ hermes-agent, Cursor, or any MCP client):
 
 ```bash
 pip install git+https://github.com/fracturedring/renpy-mcp
-renpy-mcp --project /path/to/your/renpy/project --sdk /path/to/renpy-sdk
+renpy-mcp --sdk /path/to/renpy-sdk
 ```
+
+`--project` is optional. When omitted, the server works against
+`<cwd>/games/default/` and auto-scaffolds it on first run, so a fresh
+conversation drops into a runnable starting state. Set `$RENPY_SDK`
+instead of `--sdk` if you prefer. Agents should call `new_project` at
+the start of a conversation to get their own named subfolder — see
+[AGENTS.md](AGENTS.md) for the happy-path flow.
 
 **With the RPBuilder GUI** (requires a repo checkout until the frontend
 build ships with the wheel):
@@ -42,9 +49,14 @@ API on `http://127.0.0.1:8765/` from one FastAPI process.
 
 ## Features
 
-- **43 MCP tools across 4 tiers** — read/introspection, guarded write
-  primitives, high-level authoring intents, and opt-in escape hatches. Every
-  tool description is tuned for small-model accuracy.
+- **44 MCP tools across 4 tiers** — read/introspection, guarded write
+  primitives, high-level authoring intents (including `new_project`
+  which scaffolds a runnable game in one call), and opt-in escape
+  hatches. Every tool description is tuned for small-model accuracy.
+- **One-sentence-prompt friendly** — `new_project` + the Tier 3 intents
+  are written so a low-tier model driving this server through a harness
+  (hermes-agent, Claude Code) can turn a one-line premise into a
+  runnable VN. See [AGENTS.md](AGENTS.md) for the playbook.
 - **Single guarded write pipeline** — every mutation (agent-driven or GUI-
   driven) routes through `apply_write`: path containment, cross-file label
   uniqueness, tab → 4-space normalization, atomic writes, `.rpyc` cleanup,
@@ -82,13 +94,17 @@ point:
       "command": "/path/to/renpy-mcp/.venv/bin/python",
       "args": [
         "-m", "renpy_mcp",
-        "--project", "/path/to/your/renpy/project",
         "--sdk", "/path/to/renpy-sdk"
       ]
     }
   }
 }
 ```
+
+Add `"--project", "/path/to/specific/project"` if you want to pin the
+session to an existing project; otherwise the server scaffolds
+`<cwd>/games/default/` and the agent can call `new_project` to branch
+into a named subfolder.
 
 ### hermes-agent
 
@@ -100,20 +116,31 @@ surface, filter to Tier 3 via harness-level include/exclude:
 ```json
 "tools": {
   "include": [
+    "mcp_renpy_new_project",
     "mcp_renpy_get_project_overview",
     "mcp_renpy_create_scene",
     "mcp_renpy_create_choice_node",
     "mcp_renpy_create_route",
     "mcp_renpy_add_dialogue_block",
+    "mcp_renpy_add_character",
+    "mcp_renpy_add_image_alias",
     "mcp_renpy_swap_background",
     "mcp_renpy_set_scene_music",
-    "mcp_renpy_get_lint_report"
+    "mcp_renpy_get_lint_report",
+    "mcp_renpy_launch_preview"
   ]
 }
 ```
 
 Or load only specific tiers at the server level: `--tiers 1,3` excludes
 Tier 2 entirely so small models see fewer overlapping options.
+
+Image generation is **not** part of this server — hermes ships a fal
+image tool built in. The flow is: hermes generates the PNG and writes
+it to `<project>/game/images/<name>.png`, then calls
+`mcp_renpy_add_image_alias` to register it. Same pattern for audio
+(drop the file into `<project>/game/audio/`; music is referenced
+directly by path in `play music` / `set_scene_music`).
 
 ### Cursor and other MCP clients
 
@@ -168,7 +195,7 @@ the sections above are the complete user surface.
 
 ## Status
 
-Alpha. **43 MCP tools**, **123 tests** passing in ~9 seconds. Nothing below
+Alpha. **44 MCP tools**, **136 tests** passing in ~9 seconds. Nothing below
 the top layer is frozen yet — the tier model, writer pipeline, and GUI
 architecture are stable, but tool schemas may shift.
 
@@ -197,8 +224,9 @@ Deep dive in [DESIGN.md](DESIGN.md).
   `get_preview_status`). Never writes.
 - **Tier 2** (default on) — 15 guarded write primitives. One Ren'Py
   construct per tool. Right layer for precise diffs.
-- **Tier 3** (default on) — 10 high-level authoring intents. Composes
-  multiple Tier 2 writes. The primary surface for agents.
+- **Tier 3** (default on) — 11 high-level authoring intents, including
+  `new_project` which scaffolds a runnable skeleton and rebinds the
+  session. Composes multiple Tier 2 writes. The primary surface for agents.
 - **Tier 4** (opt-in) — 2 escape hatches: `apply_unified_diff` (strict
   context-match diff applier; supports creation, refuses deletion) and
   `exec_python_in_init` (ast-validated `init python:` block appender).

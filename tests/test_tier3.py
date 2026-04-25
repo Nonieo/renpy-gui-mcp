@@ -24,13 +24,51 @@ from .conftest import FIXTURE_ROOT, SDK_ROOT, parse
 def workspace(tmp_path: Path):
     proj = tmp_path / "tiny_project"
     shutil.copytree(FIXTURE_ROOT, proj)
-    cfg = ServerConfig(project_root=proj.resolve(), sdk_root=SDK_ROOT)
+    cfg = ServerConfig(
+        project_root=proj.resolve(),
+        sdk_root=SDK_ROOT,
+        games_root=tmp_path.resolve(),
+    )
     idx = ProjectIndex(cfg)
     reg = ToolRegistry()
     tier1_read.register(reg, cfg, idx)
     tier2_write.register(reg, cfg, idx)
     tier3_intents.register(reg, cfg, idx)
     return cfg, reg, idx
+
+
+# ---------- new_project ---------------------------------------------------------
+
+
+async def test_new_project_scaffolds_and_rebinds(workspace, tmp_path):
+    cfg, reg, idx = workspace
+    out = parse(await reg.call("new_project", {"name": "Pirate Tale"}))
+    assert out["slug"] == "pirate_tale"
+    assert out["bound"] is True
+    new_root = tmp_path / "pirate_tale"
+    assert (new_root / "game" / "script.rpy").is_file()
+    # The session is now pointed at the new project — the index snapshot
+    # should reflect the scaffold's files, not the original tiny_project's.
+    assert cfg.project_root == new_root.resolve()
+    snap = idx.snapshot()
+    assert any(l.name == "start" for l in snap.labels)
+
+
+async def test_new_project_rejects_multiline_name(workspace):
+    _, reg, _ = workspace
+    out = parse(await reg.call("new_project", {"name": "bad\nname"}))
+    assert "single-line" in out["error"]
+
+
+async def test_new_project_is_idempotent(workspace, tmp_path):
+    _, reg, _ = workspace
+    await reg.call("new_project", {"name": "twice"})
+    marker = tmp_path / "twice" / "game" / "script.rpy"
+    first_bytes = marker.read_bytes()
+    out2 = parse(await reg.call("new_project", {"name": "twice"}))
+    assert out2["preexisting"] is True
+    # Existing content is left untouched on re-scaffold.
+    assert marker.read_bytes() == first_bytes
 
 
 # ---------- create_scene --------------------------------------------------------
@@ -177,6 +215,35 @@ async def test_create_route_rejects_existing_node(workspace):
 
 
 # ---------- add_dialogue_block --------------------------------------------------
+
+
+async def test_add_dialogue_block_rejects_newline(workspace):
+    """Regression: multi-line text in dialogue breaks indent/quoting."""
+    _, reg, _ = workspace
+    out = parse(
+        await reg.call(
+            "add_dialogue_block",
+            {
+                "label": "park_scene",
+                "lines": [{"character": "e", "text": "bad\nline"}],
+            },
+        )
+    )
+    assert "single-line" in out["error"]
+
+
+async def test_create_choice_node_rejects_newline_in_choice(workspace):
+    _, reg, _ = workspace
+    out = parse(
+        await reg.call(
+            "create_choice_node",
+            {
+                "name": "bad_choice_node",
+                "choices": [{"text": "pick\nme", "target_label": "ending"}],
+            },
+        )
+    )
+    assert "single-line" in out["error"]
 
 
 async def test_add_dialogue_block_appends_multiple(workspace):

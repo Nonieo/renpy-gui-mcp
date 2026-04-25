@@ -162,6 +162,29 @@ async def test_add_say_rejects_unknown_character(workspace):
     assert set(out["known"]) == {"e", "m"}
 
 
+async def test_add_say_rejects_newline_in_text(workspace):
+    """Regression: a literal newline in dialogue text breaks the .rpy indent."""
+    _, reg, _ = workspace
+    out = parse(
+        await reg.call(
+            "add_say",
+            {"label": "park_scene", "character": "e", "text": "Line one.\nLine two."},
+        )
+    )
+    assert "single-line" in out["error"]
+
+
+async def test_add_say_rejects_newline_even_with_raw(workspace):
+    _, reg, _ = workspace
+    out = parse(
+        await reg.call(
+            "add_say",
+            {"label": "park_scene", "character": "e", "text": "a\nb", "raw": True},
+        )
+    )
+    assert "single-line" in out["error"]
+
+
 async def test_add_say_narration_no_character(workspace):
     cfg, reg, _ = workspace
     await reg.call("add_say", {"label": "park_scene", "text": "Narration."})
@@ -487,6 +510,59 @@ async def test_add_layered_image_renders_groups_and_attributes(workspace):
     assert "    group body:" in text
     assert '        attribute casual "images/yuki_casual.png"' in text
     assert "    group face:" in text
+
+
+async def test_add_character_after_layered_image_lands_at_top_level(workspace):
+    """Regression for the 'script.rpy:111' bug: add_character must not
+    insert between a layeredimage's header and its indented body."""
+    cfg, reg, _ = workspace
+    await reg.call(
+        "add_layered_image",
+        {
+            "name": "luna_sprite",
+            "groups": [
+                {
+                    "name": "body",
+                    "attributes": [{"name": "neutral", "asset": "images/park.png"}],
+                }
+            ],
+        },
+    )
+    out = parse(
+        await reg.call(
+            "add_character",
+            {"var": "sailor", "display_name": "The Sailor"},
+        )
+    )
+    assert "error" not in out, out
+    text = (cfg.project_root / "game/script.rpy").read_text()
+    idx_layered = text.index("layeredimage luna_sprite:")
+    idx_body = text.index("    group body:", idx_layered)
+    idx_define = text.index('define sailor = Character("The Sailor"')
+    # The new define must appear AFTER the layeredimage's body closes,
+    # not between the header and its indented body.
+    assert idx_define > idx_body, (
+        "add_character inserted into the middle of a layeredimage block"
+    )
+
+
+async def test_add_image_alias_after_transform_lands_at_top_level(workspace):
+    """Transforms open a block too; a new image alias must not land in it."""
+    cfg, reg, _ = workspace
+    await reg.call(
+        "add_transform",
+        {"name": "slow_zoom", "body": ["zoom 1.0", "linear 2.0 zoom 1.2"]},
+    )
+    out = parse(
+        await reg.call(
+            "add_image_alias",
+            {"name": "bg night", "asset": "images/park.png"},
+        )
+    )
+    assert "error" not in out, out
+    text = (cfg.project_root / "game/script.rpy").read_text()
+    # The image alias must appear as a top-level line (no leading whitespace).
+    assert '\nimage bg night = "images/park.png"' in text
 
 
 # ---------- add_transform / add_screen ------------------------------------------

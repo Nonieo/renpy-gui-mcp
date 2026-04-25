@@ -6,6 +6,7 @@ Every mutation routes through a single guarded write pipeline (`apply_write`) �
 
 ## Start here
 
+- [AGENTS.md](AGENTS.md): one-page playbook for LLMs driving this server — one-sentence prompt → `new_project` → story → host asset tools → `add_image_alias` → `get_lint_report` → `launch_preview`
 - [README.md](README.md): install, wire-in to Claude Code / hermes-agent / GUI, feature list
 - [DESIGN.md](DESIGN.md): architecture deep-dive, tier model rationale, writer pipeline, how to add a tool / panel / tier, testing patterns, non-goals
 
@@ -14,7 +15,8 @@ Every mutation routes through a single guarded write pipeline (`apply_write`) �
 - [src/renpy_mcp/](src/renpy_mcp/): the MCP server itself
   - [tools/tier1_read.py](src/renpy_mcp/tools/tier1_read.py): 12 read-only introspection tools + `get_lint_report`
   - [tools/tier2_write.py](src/renpy_mcp/tools/tier2_write.py): 15 guarded write primitives (one statement per tool)
-  - [tools/tier3_intents.py](src/renpy_mcp/tools/tier3_intents.py): 10 high-level intents (one creator action per tool)
+  - [tools/tier3_intents.py](src/renpy_mcp/tools/tier3_intents.py): 11 high-level intents (one creator action per tool), incl. `new_project`
+  - [project/scaffold.py](src/renpy_mcp/project/scaffold.py): scaffolds a runnable Ren'Py project (SDK template preferred, minimal fallback); used by startup + `new_project`
   - [tools/tier4_escape.py](src/renpy_mcp/tools/tier4_escape.py): 2 escape hatches — `apply_unified_diff`, `exec_python_in_init` (opt-in via `--tiers 1,2,3,4`)
   - [tools/lifecycle.py](src/renpy_mcp/tools/lifecycle.py): `launch_preview` / `stop_preview` / `get_preview_status`
   - [tools/_shared.py](src/renpy_mcp/tools/_shared.py): shared helpers (`ok`, `err`, `quote`, `find_single_label`, `insert_into_label_body`, `write_response`, `BODY_INDENT`)
@@ -48,7 +50,8 @@ Every mutation routes through a single guarded write pipeline (`apply_write`) �
 ## Conventions the codebase expects
 
 - **Tool naming:** `snake_case`; action-first for writes (`add_say`), noun-first for reads (`list_labels`); no `renpy_` prefix (harness already namespaces); <=25 chars where possible.
-- **Every write tool** returns a unified diff in its response and routes through `apply_write` in [project/writer.py](src/renpy_mcp/project/writer.py).
+- **Every write tool** returns a unified diff in its response and routes through `apply_write` in [project/writer.py](src/renpy_mcp/project/writer.py). The one exception is `new_project`, which creates the project those writes later target.
+- **Dialogue text is single-line.** Tools that accept character/narration text reject literal `\n` / `\r` and tell the caller to split — a multi-line string inside a quoted say-statement would break the `.rpy` indent.
 - **Pydantic models in the GUI backend are module-scope** — closure-scoped models break Pydantic v2 forward refs.
 - **Frontend panels use TanStack Query** for server state; [panels/Variables.tsx](gui/frontend/src/panels/Variables.tsx) is the cleanest recent template.
 - **Tests for write tools** copy the fixture into `tmp_path` via `shutil.copytree(FIXTURE_ROOT, tmp_path / "tiny_project")` so the canonical fixture stays clean.

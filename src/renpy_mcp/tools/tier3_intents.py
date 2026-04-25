@@ -14,9 +14,10 @@ from typing import Any
 
 import mcp.types as types
 
-from ..config import ServerConfig
-from ..guardrails.dialogue import escape_dialogue
+from ..config import DEFAULT_GAMES_SUBDIR, ServerConfig
+from ..guardrails.dialogue import escape_dialogue, reject_multiline
 from ..guardrails.reserved import reject_reserved_identifier
+from ..project.scaffold import scaffold_project, slugify
 from ..project.scanner import LabelInfo, ProjectIndex
 from ..project.writer import WriteRejected, apply_write
 from ._shared import (
@@ -38,6 +39,7 @@ DEFAULT_SCRIPT = "game/script.rpy"
 
 
 def register(registry: ToolRegistry, config: ServerConfig, index: ProjectIndex) -> None:
+    registry.add(_new_project(config, index))
     registry.add(_create_scene(config, index))
     registry.add(_create_choice_node(config, index))
     registry.add(_create_route(config, index))
@@ -48,6 +50,86 @@ def register(registry: ToolRegistry, config: ServerConfig, index: ProjectIndex) 
     registry.add(_add_condition_branch(config, index))
     registry.add(_add_inventory_item_scaffold(config, index))
     registry.add(_add_minigame_screen_scaffold(config, index))
+
+
+# ---------- new_project ---------------------------------------------------------
+
+
+def _new_project(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": (
+                    "Project name. Converted to a safe directory slug "
+                    "(lowercase, underscores). Also used as the window title "
+                    "unless `display_name` overrides."
+                ),
+            },
+            "display_name": {
+                "type": "string",
+                "description": (
+                    "Optional title-bar / `config.name` override. Defaults to "
+                    "the original (un-slugified) name."
+                ),
+            },
+        },
+        "required": ["name"],
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        raw_name: str = arguments["name"]
+        display_name: str = arguments.get("display_name") or raw_name
+        if msg := reject_multiline(raw_name):
+            return err(f"name: {msg}")
+        if msg := reject_multiline(display_name):
+            return err(f"display_name: {msg}")
+
+        slug = slugify(raw_name)
+        games_root = (
+            config.games_root
+            if config.games_root is not None
+            else config.project_root.parent
+        )
+        games_root.mkdir(parents=True, exist_ok=True)
+        new_root = (games_root / slug).resolve()
+        preexisting = (new_root / "game" / "script.rpy").exists()
+
+        summary = scaffold_project(
+            new_root,
+            display_name=display_name,
+            sdk_root=config.sdk_root,
+        )
+        config.bind_project(new_root)
+        index.refresh()
+        return ok(
+            {
+                "summary": summary,
+                "project_root": str(new_root),
+                "slug": slug,
+                "display_name": display_name,
+                "preexisting": preexisting,
+                "bound": True,
+            }
+        )
+
+    return ToolDef(
+        name="new_project",
+        description=(
+            "Scaffold a new Ren'Py project and bind the session to it. "
+            f"Projects live under the server's games root (default: `<cwd>/{DEFAULT_GAMES_SUBDIR}/`); "
+            "the slug derived from `name` becomes the folder name. Copies the "
+            "Ren'Py SDK's project template when available so the game is "
+            "immediately runnable. Idempotent: if the target already has a "
+            "`game/script.rpy`, the existing files are left untouched and the "
+            "session is just rebound. Call this FIRST when starting from a "
+            "single-sentence prompt."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
 
 
 # ---------- create_scene --------------------------------------------------------
@@ -151,6 +233,8 @@ def _create_scene(config: ServerConfig, index: ProjectIndex) -> ToolDef:
         for char in characters:
             body.append(f"show {char}")
         for line in dialogue:
+            if msg := reject_multiline(line["text"]):
+                return err(f"dialogue text: {msg}")
             text = escape_dialogue(line["text"])
             quoted = quote(text)
             ch = line.get("character")
@@ -255,11 +339,15 @@ def _create_choice_node(config: ServerConfig, index: ProjectIndex) -> ToolDef:
 
         body: list[str] = []
         if prompt is not None:
+            if msg := reject_multiline(prompt["text"]):
+                return err(f"prompt text: {msg}")
             text = quote(escape_dialogue(prompt["text"]))
             ch = prompt.get("character")
             body.append(f"{ch} {text}" if ch else text)
         body.append("menu:")
         for choice in choices:
+            if msg := reject_multiline(choice["text"]):
+                return err(f"choice text: {msg}")
             text = quote(escape_dialogue(choice["text"]))
             condition = choice.get("condition")
             header = f"{text} if {condition}:" if condition else f"{text}:"
@@ -420,6 +508,8 @@ def _add_dialogue_block(config: ServerConfig, index: ProjectIndex) -> ToolDef:
 
         body_lines: list[str] = []
         for ln in lines:
+            if msg := reject_multiline(ln["text"]):
+                return err(f"dialogue text: {msg}")
             text = ln["text"] if raw_flag else escape_dialogue(ln["text"])
             quoted = quote(text)
             ch = ln.get("character")

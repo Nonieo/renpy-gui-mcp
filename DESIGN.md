@@ -52,7 +52,9 @@ you're about to change something and want to understand the invariants first.
 1. **Every mutation goes through `apply_write`.** No tool writes bytes
    directly. This is how path containment, label uniqueness, indent
    normalization, atomic writes, `.rpyc` cleanup, and the returned unified
-   diff stay uniform across every tier.
+   diff stay uniform across every tier. The one exception is
+   `new_project` (§1a), which creates files before the project exists —
+   no prior index to collide with and no `.rpy` to diff against.
 2. **The file system is the integration point.** The GUI and LLM harnesses
    each spawn their own `renpy-mcp` subprocess; they don't talk to each
    other. Coordination is implicit through the project files plus the
@@ -62,6 +64,34 @@ you're about to change something and want to understand the invariants first.
    "ask the LLM from the browser" is explicitly rejected — it would
    create a second dependency axis that breaks the single-integration-
    point model.
+4. **The server never calls an LLM itself.** Story generation, image
+   generation, and asset prompting all happen in the harness (Claude
+   Code, hermes-agent, Cursor). The server only stamps structured
+   changes into `.rpy` files and manages lifecycle (preview, lint). The
+   scaffold path is filesystem-only: `new_project` copies template bytes,
+   it does not invent content.
+
+### 1a. The default-folder convention
+
+Games live at `<cwd>/games/<slug>/` by default. The CWD is whichever
+directory the harness launched `renpy-mcp` from; that gives each
+conversation an obvious, non-shared scratch space.
+
+- `--project <path>` still wins when set — the server binds to that path.
+- With no `--project`, the server defaults `project_root` to
+  `<cwd>/games/default/` and auto-scaffolds it on first run so
+  `validate()` succeeds and Tier 1/2/3 tools work immediately.
+- `--games-root <path>` overrides where `new_project` drops fresh
+  projects (defaults to `<cwd>/games/`).
+- `new_project` creates a new project under the games root and rebinds
+  the session's `project_root` in place — the running server keeps its
+  tiers, its lifecycle state, and its index, but subsequent calls
+  operate against the new directory. This keeps the server a single
+  long-lived process per conversation.
+
+The `ServerConfig.project_root` field is therefore *mutable by design*:
+the dataclass dropped `frozen=True` when the scaffold flow landed.
+`bind_project(new_root)` is the only sanctioned way to mutate it.
 
 ---
 
@@ -89,12 +119,15 @@ responsibility. Tier 2 is the right layer for precise diffs.
 
 ### Tier 3 — high-level intents (one creator action per tool)
 
-10 tools: `create_scene`, `create_choice_node`, `create_route`,
-`add_dialogue_block`, `swap_background`, `add_character_to_scene`,
-`set_scene_music`, `add_condition_branch`, `add_inventory_item_scaffold`,
-`add_minigame_screen_scaffold`. These compose multiple Tier 2 writes in a
-single call. This is the *primary* surface for agents — Tier 2 exists for
-fine adjustment after an intent has landed.
+11 tools: `new_project`, `create_scene`, `create_choice_node`,
+`create_route`, `add_dialogue_block`, `swap_background`,
+`add_character_to_scene`, `set_scene_music`, `add_condition_branch`,
+`add_inventory_item_scaffold`, `add_minigame_screen_scaffold`. These
+compose multiple Tier 2 writes in a single call (or, in
+`new_project`'s case, copy a template and rebind the session — the only
+tool that predates the `apply_write` pipeline because it creates the
+project those writes target). This is the *primary* surface for agents —
+Tier 2 exists for fine adjustment after an intent has landed.
 
 ### Tier 4 — escape hatches (opt-in, touch arbitrary content)
 
@@ -316,6 +349,12 @@ spawn `sleep 30` instead of the real SDK, for example.
   concern — the Tier 4 diff applier refuses `+++ /dev/null` hunks. When
   a delete tool ships, it will be Tier 2 or its own tier, with its own
   confirmation shape.
+- **LLM calls from inside the server.** The server stamps structured
+  `.rpy` changes; it does not generate stories, prompts, or images.
+  Asset generation belongs to the harness driving this server — hermes
+  has a fal image tool built in, other harnesses plug in their own. The
+  filesystem is the handoff: the harness writes an image into
+  `<project>/game/images/`, then calls `add_image_alias` to register it.
 
 ---
 

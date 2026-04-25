@@ -21,3 +21,20 @@ def escape_dialogue(text: str) -> str:
         .replace("[", "[[")
         .replace("]", "]]")
     )
+
+
+def reject_multiline(text: str) -> str | None:
+    """Return an error message if ``text`` contains a raw newline/carriage return.
+
+    Ren'Py say-statement strings live on one line; a literal ``\\n`` in the
+    text field would break the quoted string across lines in the generated
+    ``.rpy`` — the rest of the script indents wrongly and the file fails
+    to lint. Callers should pass multi-line speech as separate calls.
+    """
+    if "\n" in text or "\r" in text:
+        return (
+            "text must be single-line; split multi-line speech into separate "
+            "calls (one line per call for `add_say`, one entry per line for "
+            "`add_dialogue_block`)"
+        )
+    return None

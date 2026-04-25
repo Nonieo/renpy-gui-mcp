@@ -74,7 +74,8 @@ def splice_line(content: str, insert_at: int, new_line: str) -> str:
 
 
 _DEFAULT_DEFINE_RE = re.compile(r"^(?:default|define)\s+")
-_TOP_LEVEL_DECL_RE = re.compile(r"^(?:default|define|image|layeredimage|transform)\s+")
+_TOP_LEVEL_DECL_RE = re.compile(r"^(?:default|define|image|layeredimage|transform|screen)\s+")
+_BLOCK_OPEN_TAIL_RE = re.compile(r":\s*(#.*)?$")
 
 
 def find_default_insertion(content: str) -> int:
@@ -83,8 +84,31 @@ def find_default_insertion(content: str) -> int:
 
 
 def find_top_level_decl_insertion(content: str) -> int:
-    """Return the 0-based line index after the last default/define/image/etc. line."""
-    return _last_match_line_plus_one(content, _TOP_LEVEL_DECL_RE)
+    """Return the 0-based line index after the last top-level declaration.
+
+    Handles both one-liners (`default x = 1`, `image bg park = "..."`) and
+    block-opening forms (`layeredimage x:`, `transform x():`, `screen x():`,
+    `image complex:`). For block forms, advances past every indented body
+    line so the returned index lands at top level — never inside a block.
+    """
+    if not content:
+        return 0
+    lines = content.splitlines()
+    last_end = -1
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if _TOP_LEVEL_DECL_RE.match(line):
+            if _BLOCK_OPEN_TAIL_RE.search(line):
+                j = i + 1
+                while j < len(lines) and (lines[j] == "" or lines[j][:1] in (" ", "\t")):
+                    j += 1
+                last_end = j
+                i = j
+                continue
+            last_end = i + 1
+        i += 1
+    return last_end if last_end >= 0 else 0
 
 
 def _last_match_line_plus_one(content: str, pattern: re.Pattern[str]) -> int:

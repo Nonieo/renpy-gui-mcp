@@ -18,7 +18,7 @@ from typing import Any
 import mcp.types as types
 
 from ..config import ServerConfig
-from ..guardrails.dialogue import escape_dialogue
+from ..guardrails.dialogue import escape_dialogue, reject_multiline
 from ..guardrails.reserved import reject_reserved_identifier
 from ..project.scanner import ProjectIndex
 from ..project.writer import WriteRejected, WriteResult, apply_write
@@ -162,6 +162,9 @@ def _add_say(config: ServerConfig, index: ProjectIndex) -> ToolDef:
         character: str | None = arguments.get("character")
         raw_text: str = arguments["text"]
         raw_flag: bool = bool(arguments.get("raw", False))
+
+        if msg := reject_multiline(raw_text):
+            return err(msg)
 
         snap = index.snapshot()
         label = find_single_label(snap.labels, label_name)
@@ -341,6 +344,8 @@ def _add_menu(config: ServerConfig, index: ProjectIndex) -> ToolDef:
 
         menu_lines: list[str] = ["menu:"]
         for ch in choices:
+            if msg := reject_multiline(ch["text"]):
+                return err(f"choice text: {msg}")
             text = ch["text"] if ch.get("raw") else escape_dialogue(ch["text"])
             quoted = quote(text)
             condition = ch.get("condition")
@@ -727,6 +732,8 @@ def _add_character(config: ServerConfig, index: ProjectIndex) -> ToolDef:
             return err(msg)
         if image_tag is not None and not image_tag.isidentifier():
             return err(f"image tag `{image_tag}` must be a single identifier")
+        if msg := reject_multiline(display_name):
+            return err(f"display_name: {msg}")
 
         snap = index.snapshot()
         if any(c.var_name == var for c in snap.characters):
@@ -785,6 +792,8 @@ def _update_character(config: ServerConfig, index: ProjectIndex) -> ToolDef:
         new_color = arguments.get("color")
         if new_display is None and new_color is None:
             return err("provide at least one of `display_name` or `color`")
+        if new_display is not None and (msg := reject_multiline(new_display)):
+            return err(f"display_name: {msg}")
 
         snap = index.snapshot()
         match = next((c for c in snap.characters if c.var_name == var), None)

@@ -1,0 +1,137 @@
+"""Minimal Ren'Py project scaffolder.
+
+Creates a runnable empty project. Prefers the SDK's own project template
+(``<sdk>/gui/``) when available — that template ships the GUI/options/screens
+boilerplate every Ren'Py game relies on. Falls back to a tiny hand-written
+skeleton when the SDK is missing or its template can't be found, so CI and
+tests that don't have the SDK still work.
+
+The server calls this at startup when ``--project`` is omitted (so the index
+has something valid to scan) and ``new_project`` calls it to spin up fresh
+games on demand. Everything beyond ``label start`` is expected to be added
+through the tiered tool surface.
+"""
+
+from __future__ import annotations
+
+import re
+import shutil
+from pathlib import Path
+
+_MIN_SCRIPT_RPY = """\
+# Entry point. Fill in with create_scene / add_dialogue_block /
+# create_choice_node / etc.
+
+label start:
+    "A new Ren'Py project, ready for authoring."
+    return
+"""
+
+_MIN_OPTIONS_RPY = """\
+## Auto-generated options.rpy — edit through update_options_field.
+
+define config.name = _("{name}")
+define config.version = "0.1.0"
+define gui.show_name = True
+define config.has_sound = True
+define config.has_music = True
+define config.has_voice = True
+"""
+
+# Template files we deliberately DO NOT carry over from the SDK template:
+#  - cache/: generated at runtime, no point seeding
+#  - saves/: runtime state
+#  - testcases.rpy: SDK test-harness template, irrelevant to authored games
+#  - tl/: empty translation scaffold; Ren'Py makes it on demand
+_TEMPLATE_SKIP = {"cache", "saves", "testcases.rpy", "tl"}
+
+_SLUG_RE = re.compile(r"[^a-z0-9_]+")
+
+
+def slugify(text: str) -> str:
+    """Normalize arbitrary text into a project-dir-safe slug.
+
+    Lowercase, ASCII, collapses dashes/spaces/punctuation to underscores.
+    Never empty — falls back to ``project``.
+    """
+    s = text.strip().lower().replace(" ", "_").replace("-", "_")
+    s = _SLUG_RE.sub("_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s or "project"
+
+
+def _sdk_template_game_dir(sdk_root: Path | None) -> Path | None:
+    """Return the SDK's project template ``game/`` dir, or None if unavailable."""
+    if sdk_root is None:
+        return None
+    candidate = sdk_root / "gui" / "game"
+    return candidate if candidate.is_dir() else None
+
+
+def scaffold_project(
+    root: Path,
+    *,
+    display_name: str | None = None,
+    sdk_root: Path | None = None,
+) -> str:
+    """Create a minimal runnable Ren'Py project at ``root``.
+
+    Returns a short human-readable summary of what was done (template source
+    used, whether the target already existed). Idempotent: never overwrites
+    existing files — if the target game dir already has a script.rpy, the
+    function leaves it alone.
+    """
+    game = root / "game"
+    already_present = game.is_dir() and (game / "script.rpy").exists()
+    game.mkdir(parents=True, exist_ok=True)
+    (game / "images").mkdir(exist_ok=True)
+    (game / "audio").mkdir(exist_ok=True)
+
+    if already_present:
+        return f"project already scaffolded at {root}"
+
+    template = _sdk_template_game_dir(sdk_root)
+    if template is not None:
+        _copy_template(template, game)
+        # Tweak options.rpy's config.name in-place so the title bar reads
+        # the chosen display name, not the SDK's default placeholder.
+        _rename_in_options(game / "options.rpy", display_name or root.name)
+        return f"scaffolded {root} from SDK template"
+
+    (game / "script.rpy").write_text(_MIN_SCRIPT_RPY, encoding="utf-8")
+    (game / "options.rpy").write_text(
+        _MIN_OPTIONS_RPY.format(name=display_name or root.name),
+        encoding="utf-8",
+    )
+    return f"scaffolded {root} (minimal skeleton; no SDK template found)"
+
+
+def _copy_template(src: Path, dst: Path) -> None:
+    for child in src.iterdir():
+        if child.name in _TEMPLATE_SKIP:
+            continue
+        target = dst / child.name
+        if target.exists():
+            continue
+        if child.is_dir():
+            shutil.copytree(child, target)
+        else:
+            shutil.copy2(child, target)
+
+
+_CONFIG_NAME_RE = re.compile(
+    r"""^(?P<prefix>define\s+config\.name\s*=\s*_\()"[^"]*"(?P<suffix>\).*)$""",
+    re.MULTILINE,
+)
+
+
+def _rename_in_options(options_path: Path, new_name: str) -> None:
+    if not options_path.is_file():
+        return
+    text = options_path.read_text(encoding="utf-8")
+    escaped = new_name.replace('"', '\\"')
+    updated, count = _CONFIG_NAME_RE.subn(
+        rf'\g<prefix>"{escaped}"\g<suffix>', text, count=1
+    )
+    if count:
+        options_path.write_text(updated, encoding="utf-8")
