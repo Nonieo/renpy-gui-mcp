@@ -124,24 +124,35 @@ model without filtering.
 
 ### Tier 2 — guarded write primitives (one statement per tool)
 
-15 tools: `add_character`, `update_character`, `add_say`, `add_jump`,
-`add_menu`, `add_condition_branch`, `set_variable_default`,
-`add_image_alias`, `add_layered_image`, `add_transform`, `add_screen`,
-`add_call`, `add_audio_play`, `set_scene_music`, `update_options_field`.
-Each tool emits a single Ren'Py construct; composition is the caller's
-responsibility. Tier 2 is the right layer for precise diffs.
+25 tools (incl. the two sidecar setters): `add_label`, `add_say`,
+`add_jump`, `add_call`, `add_menu`, `add_condition_branch`,
+`set_variable_default`, `rename_label`, `add_audio_play`,
+`add_image_alias`, `add_character`, `update_character`,
+`add_layered_image`, `add_transform`, `add_screen`,
+`update_options_field`, `add_menu_branch`, `redirect_jump`,
+`delete_label`, `add_pause`, `add_setvar`, `add_show`, `add_with_effect`,
+`add_flash`, plus the two sidecar setters `set_canvas_positions` and
+`set_ignored_diagnostics` (atomic-write metadata, not Ren'Py syntax —
+exception list in §3). Each Ren'Py-emitting tool produces a single
+construct; composition is the caller's responsibility. Tier 2 is the
+right layer for precise diffs.
 
 ### Tier 3 — high-level intents (one creator action per tool)
 
-11 tools: `new_project`, `create_scene`, `create_choice_node`,
+15 tools: `new_project`, `create_scene`, `create_choice_node`,
 `create_route`, `add_dialogue_block`, `swap_background`,
-`add_character_to_scene`, `set_scene_music`, `add_condition_branch`,
-`add_inventory_item_scaffold`, `add_minigame_screen_scaffold`. These
-compose multiple Tier 2 writes in a single call (or, in
+`add_character_to_scene`, `set_scene_music`,
+`add_inventory_item_scaffold`, `add_minigame_screen_scaffold`,
+`add_screen_layout`, `add_stage`, `add_imagemap`, `repair_scaffold`.
+These compose multiple Tier 2 writes in a single call (or, in
 `new_project`'s case, copy a template and rebind the session — the only
 tool that predates the `apply_write` pipeline because it creates the
-project those writes target). This is the *primary* surface for agents —
-Tier 2 exists for fine adjustment after an intent has landed.
+project those writes target). `set_scene_music` is the canonical example
+of a non-passthrough intent: it rewrites an existing `play music` line
+in place, otherwise inserts after the first `scene` line, otherwise
+appends — three insert paths the Tier 2 primitives don't carry. This is
+the *primary* surface for agents — Tier 2 exists for fine adjustment
+after an intent has landed.
 
 ### Tier 4 — escape hatches (opt-in, touch arbitrary content)
 

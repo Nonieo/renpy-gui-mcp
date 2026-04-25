@@ -327,6 +327,43 @@ async def test_add_menu_escapes_text(workspace):
     assert '"Pick {{bold}}":' in text
 
 
+# ---------- add_condition_branch -----------------------------------------------
+
+
+async def test_add_condition_branch_if_elif_else(workspace):
+    cfg, reg, _ = workspace
+    out = parse(
+        await reg.call(
+            "add_condition_branch",
+            {
+                "label": "park_scene",
+                "branches": [
+                    {"condition": "affection_mei > 5", "body": ['e "Wow."']},
+                    {"condition": "affection_mei > 0", "body": ['e "Hmm."']},
+                    {"body": ['e "OK."']},
+                ],
+            },
+        )
+    )
+    assert "added if/elif/else block (3 branch(es))" in out["summary"]
+    text = (cfg.project_root / "game/script.rpy").read_text()
+    park_block = text.split("label park_scene:")[1].split("label ")[0]
+    assert "if affection_mei > 5:" in park_block
+    assert "elif affection_mei > 0:" in park_block
+    assert "else:" in park_block
+
+
+async def test_add_condition_branch_first_must_have_condition(workspace):
+    _, reg, _ = workspace
+    out = parse(
+        await reg.call(
+            "add_condition_branch",
+            {"label": "park_scene", "branches": [{"body": ["pass"]}]},
+        )
+    )
+    assert "first branch must have a `condition`" in out["error"]
+
+
 # ---------- add_audio_play ------------------------------------------------------
 
 

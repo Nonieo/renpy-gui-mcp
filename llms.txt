@@ -15,9 +15,9 @@ Every mutation routes through a single guarded write pipeline (`apply_write`) â€
 ## Source map
 
 - [src/renpy_mcp/](src/renpy_mcp/): the MCP server itself
-  - [tools/tier1_read.py](src/renpy_mcp/tools/tier1_read.py): 12 read-only introspection tools + `get_lint_report`
-  - [tools/tier2_write.py](src/renpy_mcp/tools/tier2_write.py): 15 guarded write primitives (one statement per tool)
-  - [tools/tier3_intents.py](src/renpy_mcp/tools/tier3_intents.py): 11 high-level intents (one creator action per tool), incl. `new_project`
+  - [tools/tier1_read.py](src/renpy_mcp/tools/tier1_read.py): 26 read tools â€” introspection (`list_*` / `read_*`), choice graph, translation coverage, in-process diagnostics (`find_*`), plus `get_lint_report` and the canvas/diagnostic-suppression sidecar reads
+  - [tools/tier2_write.py](src/renpy_mcp/tools/tier2_write.py): 26 guarded write primitives (one Ren'Py construct per tool, incl. `add_condition_branch` for if/elif/else)
+  - [tools/tier3_intents.py](src/renpy_mcp/tools/tier3_intents.py): 14 high-level intents (one creator action per tool), incl. `new_project`, `set_scene_music` (rewrite-or-insert, three paths), and the three composers (`add_screen_layout` / `add_stage` / `add_imagemap`)
   - [project/scaffold.py](src/renpy_mcp/project/scaffold.py): scaffolds a runnable Ren'Py project (SDK template preferred, minimal fallback); used by startup + `new_project`
   - [tools/tier4_escape.py](src/renpy_mcp/tools/tier4_escape.py): 2 escape hatches â€” `apply_unified_diff`, `exec_python_in_init` (opt-in via `--tiers 1,2,3,4`)
   - [tools/lifecycle.py](src/renpy_mcp/tools/lifecycle.py): `launch_preview` / `stop_preview` / `get_preview_status`
@@ -37,7 +37,7 @@ Every mutation routes through a single guarded write pipeline (`apply_write`) â€
   - [gui/frontend/src/api/client.ts](gui/frontend/src/api/client.ts): fetch wrapper; use `api<T>("/api/...", {json, method})` for every call
   - [gui/frontend/src/api/types.ts](gui/frontend/src/api/types.ts): shared frontend types that mirror MCP tool responses
 
-- [tests/](tests/): pytest suite, 123 tests, ~9s full run
+- [tests/](tests/): pytest suite, ~290+ tests, ~16s full run
   - [tests/conftest.py](tests/conftest.py): `FIXTURE_ROOT`, `SDK_ROOT`, `parse()` helper, default `config` / `registry` fixtures
   - [tests/test_tier1.py](tests/test_tier1.py) / [test_tier2.py](tests/test_tier2.py) / [test_tier3.py](tests/test_tier3.py) / [test_tier4.py](tests/test_tier4.py): per-tier unit tests
   - [tests/test_gui_backend.py](tests/test_gui_backend.py): FastAPI TestClient; module-skipped when `RENPY_SDK` is not present

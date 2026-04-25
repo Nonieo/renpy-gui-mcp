@@ -51,6 +51,7 @@ def register(registry: ToolRegistry, config: ServerConfig, index: ProjectIndex) 
     registry.add(_add_jump(config, index))
     registry.add(_add_call(config, index))
     registry.add(_add_menu(config, index))
+    registry.add(_add_condition_branch(config, index))
     registry.add(_set_variable_default(config, index))
     registry.add(_rename_label(config, index))
     registry.add(_add_audio_play(config, index))
@@ -555,6 +556,81 @@ def _add_menu(config: ServerConfig, index: ProjectIndex) -> ToolDef:
             "prompt (auto-escaped), `body` is the lines run on selection "
             "(defaults to `pass`), `condition` is an optional Python expression "
             "that gates the choice. Indentation is generated automatically."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- add_condition_branch -----------------------------------------------
+
+
+def _add_condition_branch(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {
+        "type": "object",
+        "properties": {
+            "label": {"type": "string", "description": "Existing label whose body receives the if/elif/else block."},
+            "branches": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "condition": {
+                            "type": "string",
+                            "description": (
+                                "Python expression for the branch. Omit on the "
+                                "last branch to make it the `else` clause."
+                            ),
+                        },
+                        "body": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Lines run when the condition holds. Defaults to `[\"pass\"]`.",
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["label", "branches"],
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        label_name: str = arguments["label"]
+        branches: list[dict[str, Any]] = arguments["branches"]
+
+        snap = index.snapshot()
+        label = find_single_label(snap.labels, label_name)
+        if isinstance(label, str):
+            return err(label)
+
+        body_lines: list[str] = []
+        for idx, branch in enumerate(branches):
+            condition = branch.get("condition")
+            body = branch.get("body") or ["pass"]
+            if idx == 0:
+                if not condition:
+                    return err("first branch must have a `condition`")
+                body_lines.append(f"if {condition}:")
+            elif condition is None:
+                body_lines.append("else:")
+            else:
+                body_lines.append(f"elif {condition}:")
+            body_lines.extend(f"{BODY_INDENT}{ln}" for ln in body)
+
+        return insert_into_label_body(
+            config, index, label, body_lines,
+            summary=f"added if/elif/else block ({len(branches)} branch(es)) to `{label_name}`",
+        )
+
+    return ToolDef(
+        name="add_condition_branch",
+        description=(
+            "Append an `if/elif/else` block to a label's body. Each branch is "
+            "`{condition?, body}`. The first branch must have a `condition`; "
+            "an omitted condition on the last branch becomes `else`."
         ),
         input_schema=schema,
         handler=handler,
