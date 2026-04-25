@@ -26,7 +26,7 @@ If options 2 or 3 sound foreign, see [QUICKSTART.md](QUICKSTART.md) —
 it walks through "I've never used any of this" to "I can preview my
 own VN" in about 15 minutes.
 
-For the under-the-hood story (75 MCP tools, four tiers, a single
+For the under-the-hood story (76 MCP tools, four tiers, a single
 guarded write pipeline that keeps every edit lint-clean), keep reading.
 
 ## What it looks like
@@ -128,7 +128,7 @@ older `gui/run.sh /path/to/project /path/to/sdk` still works.
 
 ## Features
 
-- **75 MCP tools across 4 tiers** (73 default + 2 opt-in) — reads,
+- **76 MCP tools across 4 tiers** (74 default + 2 opt-in) — reads,
   introspection, in-process diagnostics, lifecycle (preview / warp /
   drafting / translation scaffolding / distribute), guarded write
   primitives, high-level authoring intents (`new_project` scaffolds a
@@ -312,7 +312,7 @@ end-to-end smoke probes.
 
 ## Status
 
-Alpha. **75 MCP tools** (73 default + 2 opt-in), **329 tests** passing in
+Alpha. **76 MCP tools** (74 default + 2 opt-in), **333 tests** passing in
 ~9 seconds. End-to-end smoke probes:
 `scripts/integration_drive.py` (40-step in-process drive: scaffold →
 author → diagnose → warp → translate → distribute) and
@@ -348,13 +348,15 @@ Deep dive in [DESIGN.md](DESIGN.md).
   `set_drafting_mode`, `generate_translation_scaffolding`,
   `build_distribution`). Lifecycle tools spawn the Ren'Py SDK; the
   reads never do.
-- **Tier 2** (default on) — 26 guarded write primitives. One Ren'Py
+- **Tier 2** (default on) — 27 guarded write primitives. One Ren'Py
   construct per tool. Right layer for precise diffs. Includes the
   Phase 4 event tools (`add_pause`, `add_setvar`, `add_show`,
   `add_with_effect`, `add_flash`) that the Inspector's insert-event
-  popup wires up, plus `add_menu` and `add_condition_branch` (the
+  popup wires up, `add_menu` and `add_condition_branch` (the
   if/elif/else block primitive — single Ren'Py construct, single
-  `apply_write` call).
+  `apply_write` call), plus `update_menu_choice` (line-precise rewrite
+  of a single choice's prompt — paired with the Choice View pill
+  editor).
 - **Tier 3** (default on) — 14 high-level authoring intents, including
   `new_project` (scaffolds a runnable skeleton and rebinds the session)
   and the three composer tools (`add_screen_layout`, `add_stage`,
@@ -418,7 +420,7 @@ src/renpy_mcp/               # the MCP server
   tools/
     tier1_read.py            # reads + lint + diagnostics (26 tools)
     lifecycle.py             # preview / warp / drafting / build (7 tools)
-    tier2_write.py           # guarded write primitives (26 tools)
+    tier2_write.py           # guarded write primitives (27 tools)
     tier3_intents.py         # high-level intents (14 tools)
     tier4_escape.py          # escape hatches (2 tools, opt-in)
     _shared.py               # helpers reused across tiers

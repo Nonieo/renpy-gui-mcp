@@ -166,6 +166,13 @@ class RedirectJumpBody(BaseModel):
     new_target: str
 
 
+class UpdateMenuChoiceBody(BaseModel):
+    file: str
+    line: int
+    text: str
+    raw: bool = False
+
+
 class AddMenuBody(BaseModel):
     choices: list[dict]
 
@@ -485,6 +492,10 @@ def build_app(project_root: Path, sdk_root: Path, static_dir: Path | None = None
     @app.post("/api/jumps/redirect")
     async def redirect_jump(body: RedirectJumpBody = Body(...)) -> Any:
         return await state.client.call("redirect_jump", body.model_dump(exclude_none=True))
+
+    @app.post("/api/menu-choices/edit")
+    async def update_menu_choice(body: UpdateMenuChoiceBody = Body(...)) -> Any:
+        return await state.client.call("update_menu_choice", body.model_dump(exclude_none=True))
 
     # ---------- preview lifecycle ----------
 

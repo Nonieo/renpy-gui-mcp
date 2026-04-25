@@ -327,6 +327,69 @@ async def test_add_menu_escapes_text(workspace):
     assert '"Pick {{bold}}":' in text
 
 
+# ---------- update_menu_choice -------------------------------------------------
+
+
+async def test_update_menu_choice_rewrites_line(workspace):
+    cfg, reg, _ = workspace
+    out = parse(
+        await reg.call(
+            "update_menu_choice",
+            {"file": "game/script.rpy", "line": 23, "text": "Head to the cafe"},
+        )
+    )
+    assert "updated choice at game/script.rpy:23" in out["summary"]
+    text = (cfg.project_root / "game/script.rpy").read_text()
+    assert '"Head to the cafe":' in text
+    # The other choice and the body line are untouched.
+    assert '"Stay in the park":' in text
+    assert "$ met_mei = True" in text
+
+
+async def test_update_menu_choice_preserves_condition(workspace):
+    cfg, reg, _ = workspace
+    # Replace the second choice with a conditional version, then rewrite
+    # only the text and verify the condition survives.
+    target = cfg.project_root / "game/script.rpy"
+    text = target.read_text()
+    text = text.replace(
+        '        "Stay in the park":',
+        '        "Stay in the park" if met_mei:',
+    )
+    target.write_text(text)
+    out = parse(
+        await reg.call(
+            "update_menu_choice",
+            {"file": "game/script.rpy", "line": 27, "text": "Linger here"},
+        )
+    )
+    assert "updated choice at" in out["summary"]
+    text = target.read_text()
+    assert '"Linger here" if met_mei:' in text
+
+
+async def test_update_menu_choice_rejects_non_choice_line(workspace):
+    _, reg, _ = workspace
+    out = parse(
+        await reg.call(
+            "update_menu_choice",
+            {"file": "game/script.rpy", "line": 19, "text": "x"},
+        )
+    )
+    assert "is not a menu choice" in out["error"]
+
+
+async def test_update_menu_choice_rejects_newline_in_text(workspace):
+    _, reg, _ = workspace
+    out = parse(
+        await reg.call(
+            "update_menu_choice",
+            {"file": "game/script.rpy", "line": 23, "text": "two\nlines"},
+        )
+    )
+    assert "text:" in out["error"]
+
+
 # ---------- add_condition_branch -----------------------------------------------
 
 

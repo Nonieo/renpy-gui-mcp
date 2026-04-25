@@ -16,7 +16,7 @@ Every mutation routes through a single guarded write pipeline (`apply_write`) �
 
 - [src/renpy_mcp/](src/renpy_mcp/): the MCP server itself
   - [tools/tier1_read.py](src/renpy_mcp/tools/tier1_read.py): 26 read tools — introspection (`list_*` / `read_*`), choice graph, translation coverage, in-process diagnostics (`find_*`), plus `get_lint_report` and the canvas/diagnostic-suppression sidecar reads
-  - [tools/tier2_write.py](src/renpy_mcp/tools/tier2_write.py): 26 guarded write primitives (one Ren'Py construct per tool, incl. `add_condition_branch` for if/elif/else)
+  - [tools/tier2_write.py](src/renpy_mcp/tools/tier2_write.py): 27 guarded write primitives (one Ren'Py construct per tool, incl. `add_condition_branch` for if/elif/else and `update_menu_choice` for line-precise menu pill text edits)
   - [tools/tier3_intents.py](src/renpy_mcp/tools/tier3_intents.py): 14 high-level intents (one creator action per tool), incl. `new_project`, `set_scene_music` (rewrite-or-insert, three paths), and the three composers (`add_screen_layout` / `add_stage` / `add_imagemap`)
   - [project/scaffold.py](src/renpy_mcp/project/scaffold.py): scaffolds a runnable Ren'Py project (SDK template preferred, minimal fallback); used by startup + `new_project`
   - [tools/tier4_escape.py](src/renpy_mcp/tools/tier4_escape.py): 2 escape hatches — `apply_unified_diff`, `exec_python_in_init` (opt-in via `--tiers 1,2,3,4`)

@@ -51,6 +51,7 @@ def register(registry: ToolRegistry, config: ServerConfig, index: ProjectIndex) 
     registry.add(_add_jump(config, index))
     registry.add(_add_call(config, index))
     registry.add(_add_menu(config, index))
+    registry.add(_update_menu_choice(config, index))
     registry.add(_add_condition_branch(config, index))
     registry.add(_set_variable_default(config, index))
     registry.add(_rename_label(config, index))
@@ -556,6 +557,112 @@ def _add_menu(config: ServerConfig, index: ProjectIndex) -> ToolDef:
             "prompt (auto-escaped), `body` is the lines run on selection "
             "(defaults to `pass`), `condition` is an optional Python expression "
             "that gates the choice. Indentation is generated automatically."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- update_menu_choice -------------------------------------------------
+
+
+_CHOICE_LINE_RE = re.compile(
+    r"^(?P<indent>\s*)(?P<text>\".*?\"|'.*?')\s*(?:if\s+(?P<cond>.+?))?\s*:\s*$"
+)
+
+
+def _update_menu_choice(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    schema = {
+        "type": "object",
+        "properties": {
+            "file": {
+                "type": "string",
+                "description": "POSIX path to the .rpy file containing the choice (relative to project root).",
+            },
+            "line": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "1-based line number of the `\"text\":` choice line to rewrite.",
+            },
+            "text": {
+                "type": "string",
+                "description": "New prompt text. Auto-escaped like `add_say` text unless `raw` is true.",
+            },
+            "raw": {
+                "type": "boolean",
+                "default": False,
+                "description": "If true, skip metacharacter escaping on `text`.",
+            },
+        },
+        "required": ["file", "line", "text"],
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        rel: str = arguments["file"]
+        line_no: int = int(arguments["line"])
+        new_text: str = arguments["text"]
+        raw: bool = bool(arguments.get("raw", False))
+
+        if msg := reject_multiline(new_text):
+            return err(f"text: {msg}")
+
+        target_path = config.project_root / rel
+        if not target_path.is_file():
+            return err(f"file does not exist: {rel}")
+        text = target_path.read_text(encoding="utf-8")
+        file_lines = text.splitlines()
+        if line_no < 1 or line_no > len(file_lines):
+            return err(f"line {line_no} out of range for {rel}")
+
+        original = file_lines[line_no - 1]
+        m = _CHOICE_LINE_RE.match(original)
+        if not m:
+            return err(
+                f"line {line_no} in {rel} is not a menu choice "
+                f"(`\"text\":` or `\"text\" if cond:`): `{original.strip()}`"
+            )
+
+        escaped = new_text if raw else escape_dialogue(new_text)
+        quoted = quote(escaped)
+        cond = m.group("cond")
+        new_line = f"{m.group('indent')}{quoted}"
+        if cond:
+            new_line += f" if {cond}"
+        new_line += ":"
+
+        if new_line == original:
+            return ok(
+                {
+                    "summary": f"choice at {rel}:{line_no} already reads `{quoted}`",
+                    "no_op": True,
+                    "file": rel,
+                    "diff": "",
+                    "warnings": [],
+                    "rpyc_cleaned": [],
+                }
+            )
+
+        file_lines[line_no - 1] = new_line
+        new_content = "\n".join(file_lines)
+        if text.endswith("\n"):
+            new_content += "\n"
+
+        return write_response(
+            config,
+            index,
+            rel,
+            new_content,
+            summary=f"updated choice at {rel}:{line_no}",
+        )
+
+    return ToolDef(
+        name="update_menu_choice",
+        description=(
+            "Rewrite a single menu choice's prompt text at a specific (file, "
+            "line). Preserves the choice's `if <condition>` clause and "
+            "indentation. Use this when the Choice View edits a pill in place. "
+            "Refuses if the line isn't a menu choice."
         ),
         input_schema=schema,
         handler=handler,

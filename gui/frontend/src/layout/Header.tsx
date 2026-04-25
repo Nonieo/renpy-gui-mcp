@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Play, Square, Download, Loader2, Settings, FileEdit } from "lucide-react";
 import { api } from "@/api/client";
 import { useWatcherEvent } from "@/api/ws";
+import { LintBadge } from "@/layout/LintBadge";
 
 interface PreviewStatus {
   running: boolean;
@@ -45,6 +46,7 @@ export function Header({ onOpenPrefs }: { onOpenPrefs: () => void }) {
       </div>
       <div className="flex items-center gap-3">
         <WatcherPill />
+        <LintBadge />
         <DraftingToggle />
         <button
           type="button"

@@ -11,10 +11,11 @@
  * Inspector exposes per-event drag affordances.
  */
 
-import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, AlertCircle } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowRight, AlertCircle, Pencil } from "lucide-react";
 import { api } from "@/api/client";
-import type { ChoiceGraph, ChoiceRecord } from "@/api/types";
+import type { ChoiceBranch, ChoiceGraph, ChoiceRecord } from "@/api/types";
 
 export function ChoiceView({
   onSelectLabel,
@@ -54,6 +55,7 @@ export function ChoiceView({
           <ChoiceCard
             key={`${choice.label}:${choice.line}`}
             choice={choice}
+            file={choice.file}
             onSelectLabel={onSelectLabel}
           />
         ))}
@@ -64,9 +66,11 @@ export function ChoiceView({
 
 function ChoiceCard({
   choice,
+  file,
   onSelectLabel,
 }: {
   choice: ChoiceRecord;
+  file: string;
   onSelectLabel: (name: string) => void;
 }) {
   return (
@@ -84,17 +88,12 @@ function ChoiceCard({
         </span>
       </header>
       <ul className="divide-y divide-line">
-        {choice.branches.map((branch, i) => (
-          <li key={i} className="px-4 py-2 flex items-start gap-3 text-sm">
-            <span
-              className="inline-flex items-center px-2 py-0.5 rounded-full text-xs"
-              style={{
-                background: "var(--rp-card-2)",
-                color: "var(--rp-ink-2)",
-              }}
-            >
-              "{branch.text}"
-            </span>
+        {choice.branches.map((branch) => (
+          <li
+            key={`${branch.line}:${branch.text}`}
+            className="px-4 py-2 flex items-start gap-3 text-sm"
+          >
+            <ChoicePill branch={branch} file={file} />
             {branch.condition && (
               <span
                 className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono"
@@ -131,6 +130,108 @@ function ChoiceCard({
         ))}
       </ul>
     </article>
+  );
+}
+
+function ChoicePill({ branch, file }: { branch: ChoiceBranch; file: string }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(branch.text);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  // Reset the draft if upstream text changes (a refetch after a successful
+  // edit) so reopening the pill picks up the new value.
+  useEffect(() => {
+    if (!editing) setDraft(branch.text);
+  }, [branch.text, editing]);
+
+  const submit = useMutation({
+    mutationFn: async () => {
+      const trimmed = draft.trim();
+      if (!trimmed) throw new Error("text cannot be empty");
+      if (trimmed === branch.text) {
+        setEditing(false);
+        return;
+      }
+      const data = await api<{ summary?: string; error?: string }>(
+        "/api/menu-choices/edit",
+        { method: "POST", json: { file, line: branch.line, text: trimmed } },
+      );
+      if (data.error) throw new Error(data.error);
+    },
+    onSuccess: () => {
+      setEditing(false);
+      setError(null);
+      qc.invalidateQueries({ queryKey: ["choice-graph"] });
+      qc.invalidateQueries({ queryKey: ["graph"] });
+      qc.invalidateQueries({ queryKey: ["overview"] });
+    },
+    onError: (err) => setError(String(err)),
+  });
+
+  if (editing) {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setError(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submit.mutate();
+            } else if (e.key === "Escape") {
+              setDraft(branch.text);
+              setEditing(false);
+              setError(null);
+            }
+          }}
+          disabled={submit.isPending}
+          className="px-2 py-0.5 border border-line rounded text-xs bg-card text-ink min-w-[14ch]"
+        />
+        <button
+          type="button"
+          onClick={() => submit.mutate()}
+          disabled={submit.isPending || !draft.trim()}
+          className="text-[10px] font-mono text-ink3 hover:text-ink disabled:opacity-50"
+        >
+          {submit.isPending ? "…" : "save"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setDraft(branch.text);
+            setEditing(false);
+            setError(null);
+          }}
+          className="text-[10px] font-mono text-ink3 hover:text-ink"
+        >
+          cancel
+        </button>
+        {error && <span className="text-[10px] text-rose-600">{error}</span>}
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      className="group inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs hover:ring-1 hover:ring-line"
+      style={{ background: "var(--rp-card-2)", color: "var(--rp-ink-2)" }}
+      title="Edit choice text"
+    >
+      <span>"{branch.text}"</span>
+      <Pencil className="w-3 h-3 opacity-0 group-hover:opacity-60" />
+    </button>
   );
 }
 

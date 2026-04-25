@@ -124,10 +124,10 @@ model without filtering.
 
 ### Tier 2 — guarded write primitives (one statement per tool)
 
-25 tools (incl. the two sidecar setters): `add_label`, `add_say`,
-`add_jump`, `add_call`, `add_menu`, `add_condition_branch`,
-`set_variable_default`, `rename_label`, `add_audio_play`,
-`add_image_alias`, `add_character`, `update_character`,
+27 tools (incl. the two sidecar setters): `add_label`, `add_say`,
+`add_jump`, `add_call`, `add_menu`, `update_menu_choice`,
+`add_condition_branch`, `set_variable_default`, `rename_label`,
+`add_audio_play`, `add_image_alias`, `add_character`, `update_character`,
 `add_layered_image`, `add_transform`, `add_screen`,
 `update_options_field`, `add_menu_branch`, `redirect_jump`,
 `delete_label`, `add_pause`, `add_setvar`, `add_show`, `add_with_effect`,
