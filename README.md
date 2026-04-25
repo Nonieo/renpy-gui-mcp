@@ -29,6 +29,50 @@ own VN" in about 15 minutes.
 For the under-the-hood story (74 MCP tools, four tiers, a single
 guarded write pipeline that keeps every edit lint-clean), keep reading.
 
+## What it looks like
+
+**Story Map** — every label in your project as a draggable card. Kind
+badges (start / scene / choice / ending), drag-to-connect ports for
+new edges, persisted positions. Built on native pointer events; no
+React-Flow.
+
+![Story Map](docs/screenshots/01_story_map.png)
+
+**Scene Inspector** — opens when you click any node. Renders the
+label's ordered event stream (scene, play, show, say, pause, set,
+jump, …) as typed cards, each with the source line number. The forms
+at the top edit background / music / dialogue; the *Insert event*
+button at the bottom drops in pause / setvar / show / with / flash
+events.
+
+![Scene Inspector](docs/screenshots/02_inspector_event_stream.png)
+
+**Choice View** — derived player perspective. Every top-level `menu:`
+becomes a card listing its choices as pills with `if`-guard badges.
+Click a target to jump back to its label in the Story Map.
+
+![Choice View](docs/screenshots/03_choice_view.png)
+
+**Composers** — visual generators for screens, multi-sprite stages,
+imagemaps, and menus. Each composer takes a typed JSON tree and
+appends one Ren'Py construct via the matching Tier 3 tool; agents
+call the same tools directly.
+
+![Composers panel](docs/screenshots/04_composers.png)
+
+**Languages** — per-language translation coverage from
+`game/tl/<lang>/`. Click a row to load its stale-string list; the
+"+ Scaffold" button runs `renpy.sh translate` to bootstrap a new
+language.
+
+![Languages panel](docs/screenshots/05_languages.png)
+
+**Themed shell** — three surface themes (light / cream / dark), six
+accent presets, sidebar variants (icon / labeled / palette). Every
+preference persists in `localStorage`.
+
+![Preferences modal](docs/screenshots/06_preferences.png)
+
 > **LLM agents and fresh contributors:** start with [llms.txt](llms.txt) for
 > an indexed source map, then [DESIGN.md](DESIGN.md) for the architecture,
 > tier model, writer pipeline, and how to add a tool or panel safely.
@@ -247,6 +291,11 @@ preferences persist in `localStorage`.
 Everything below is for people extending this codebase — either the MCP
 server, a GUI panel, or the tests. If that's not you, stop reading here;
 the sections above are the complete user surface.
+
+The shortest contributor onboarding lives in
+[CONTRIBUTING.md](CONTRIBUTING.md): where new code goes per tier, the
+non-negotiable invariants, testing patterns, and how to run the
+end-to-end smoke probes.
 
 ## Status
 
