@@ -32,11 +32,15 @@ pytestmark = pytest.mark.skipif(
 @pytest.fixture
 def app_client(tmp_path: Path):
     """Per-test FastAPI client backed by a fresh fixture-project copy."""
+    from renpy_mcp_gui import recent as gui_recent
+
+    gui_recent.clear()
     proj = tmp_path / "tiny_project"
     shutil.copytree(FIXTURE_ROOT, proj)
     app = build_app(proj.resolve(), SDK_ROOT)
     with TestClient(app) as client:
         yield client, proj
+    gui_recent.clear()
 
 
 # ---------- read endpoints ------------------------------------------------------
@@ -268,6 +272,26 @@ def test_ws_pushes_file_change_event(app_client):
 
 
 # ---------- fallback shape checks ----------------------------------------------
+
+
+def test_recent_edits_records_gui_writes(app_client):
+    client, _ = app_client
+
+    r = client.get("/api/recent-edits")
+    assert r.status_code == 200
+    assert r.json()["count"] == 0
+
+    r = client.patch("/api/characters/m", json={"color": "#aa00aa"})
+    assert r.status_code == 200
+
+    r = client.get("/api/recent-edits")
+    body = r.json()
+    assert body["count"] >= 1
+    entry = body["entries"][0]
+    assert entry["origin"] == "gui"
+    assert entry["file"] == "game/script.rpy"
+    assert "@@" in entry["diff"]
+    assert "summary" in entry
 
 
 def test_invalid_json_body_returns_422(app_client):

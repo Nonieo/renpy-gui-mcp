@@ -25,6 +25,7 @@ from ..config import ServerConfig
 from ..guardrails import indent as indent_guard
 from ..guardrails import labels as label_guard
 from ..guardrails import reserved as reserved_guard
+from . import recent as recent_buffer
 from .scanner import ProjectIndex
 
 
@@ -46,6 +47,8 @@ def apply_write(
     index: ProjectIndex,
     rel_path: str,
     new_content: str,
+    *,
+    summary: str | None = None,
 ) -> WriteResult:
     target = _resolve_inside(config.project_root, rel_path)
 
@@ -86,6 +89,13 @@ def apply_write(
     )
 
     index.refresh()
+
+    recent_buffer.record(
+        file=rel_path,
+        summary=summary or f"wrote {rel_path}",
+        diff=diff,
+        warnings=indent_warnings,
+    )
 
     return WriteResult(
         file=rel_path,

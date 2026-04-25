@@ -189,7 +189,7 @@ def write_response(
 ) -> list[types.TextContent]:
     """Run the new content through `apply_write` and shape the tool response."""
     try:
-        result = apply_write(config, index, rel_file, new_text)
+        result = apply_write(config, index, rel_file, new_text, summary=summary)
     except WriteRejected as exc:
         return err(str(exc))
     return ok(

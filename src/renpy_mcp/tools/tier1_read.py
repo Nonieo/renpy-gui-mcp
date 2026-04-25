@@ -25,6 +25,7 @@ from ..project.label_tree import (
     parse_label_body,
     parse_label_from_disk,
 )
+from ..project import recent as recent_buffer
 from ..project.translations import (
     coverage_summary,
     list_languages,
@@ -71,6 +72,7 @@ def register(registry: ToolRegistry, config: ServerConfig, index: ProjectIndex) 
     registry.add(_get_choice_graph(config, index))
     registry.add(_get_translation_coverage(config))
     registry.add(_find_stale_translations(config))
+    registry.add(_get_recent_edits())
 
 
 # ---------- get_project_overview ------------------------------------------------
@@ -1341,6 +1343,49 @@ def _refresh_project(index: ProjectIndex) -> ToolDef:
             "so subsequent read tools reflect the on-disk state. The server "
             "auto-refreshes after every internal write through `apply_write`; "
             "this tool exists for the out-of-band case."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- get_recent_edits ----------------------------------------------------
+
+
+def _get_recent_edits() -> ToolDef:
+    schema = {
+        "type": "object",
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "minimum": 0,
+                "description": (
+                    "Maximum entries to return, newest-first. Omit for the "
+                    "full ring buffer (capped at 50)."
+                ),
+            },
+        },
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        limit = arguments.get("limit")
+        entries = recent_buffer.snapshot(limit=limit if isinstance(limit, int) else None)
+        return _ok(
+            {
+                "count": len(entries),
+                "entries": [e.to_dict() for e in entries],
+            }
+        )
+
+    return ToolDef(
+        name="get_recent_edits",
+        description=(
+            "Return this server's most recent successful writes (newest-first) "
+            "with timestamp, file path, summary, and unified diff. Useful for "
+            "agent self-correction after a multi-step edit. Per-process buffer "
+            "of the last 50 writes; a separate `renpy-mcp` instance (e.g. the "
+            "GUI's own subprocess) has its own buffer."
         ),
         input_schema=schema,
         handler=handler,

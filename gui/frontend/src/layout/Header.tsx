@@ -4,6 +4,7 @@ import { Play, Square, Download, Loader2, Settings, FileEdit } from "lucide-reac
 import { api } from "@/api/client";
 import { useWatcherEvent } from "@/api/ws";
 import { LintBadge } from "@/layout/LintBadge";
+import { RecentDisclosure } from "@/layout/RecentDisclosure";
 
 interface PreviewStatus {
   running: boolean;
@@ -16,7 +17,13 @@ interface PreviewStatus {
   error?: string;
 }
 
-export function Header({ onOpenPrefs }: { onOpenPrefs: () => void }) {
+export function Header({
+  onOpenPrefs,
+  onSelectLabel,
+}: {
+  onOpenPrefs: () => void;
+  onSelectLabel: (name: string) => void;
+}) {
   const meta = useQuery({
     queryKey: ["meta"],
     queryFn: () => api<{ project_root: string }>("/api/meta"),
@@ -46,6 +53,7 @@ export function Header({ onOpenPrefs }: { onOpenPrefs: () => void }) {
       </div>
       <div className="flex items-center gap-3">
         <WatcherPill />
+        <RecentDisclosure onSelectLabel={onSelectLabel} />
         <LintBadge />
         <DraftingToggle />
         <button

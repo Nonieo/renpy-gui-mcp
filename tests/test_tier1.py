@@ -128,3 +128,87 @@ async def test_get_lint_report_runs(registry):
     out = parse(await registry.call("get_lint_report", {}))
     assert "stdout" in out
     assert "returncode" in out
+
+
+# ---------- get_recent_edits ----------------------------------------------------
+
+
+@pytest.fixture
+def write_workspace(tmp_path):
+    """Tiered registry over a fresh fixture copy + a cleared recent-edits buffer."""
+    import shutil
+    from renpy_mcp.config import ServerConfig
+    from renpy_mcp.project import recent as recent_buffer
+    from renpy_mcp.project.scanner import ProjectIndex
+    from renpy_mcp.tools import tier1_read, tier2_write
+    from renpy_mcp.tools.registry import ToolRegistry
+
+    from .conftest import FIXTURE_ROOT, SDK_ROOT
+
+    proj = tmp_path / "tiny_project"
+    shutil.copytree(FIXTURE_ROOT, proj)
+    cfg = ServerConfig(project_root=proj.resolve(), sdk_root=SDK_ROOT)
+    idx = ProjectIndex(cfg)
+    reg = ToolRegistry()
+    tier1_read.register(reg, cfg, idx)
+    tier2_write.register(reg, cfg, idx)
+    recent_buffer.clear()
+    yield cfg, reg, idx
+    recent_buffer.clear()
+
+
+async def test_get_recent_edits_records_writes(write_workspace):
+    _, reg, _ = write_workspace
+    # Empty until a write happens.
+    out = parse(await reg.call("get_recent_edits", {}))
+    assert out["count"] == 0
+    assert out["entries"] == []
+
+    # A successful Tier 2 write should land in the buffer.
+    await reg.call(
+        "add_say",
+        {"label": "park_scene", "character": "e", "text": "A new line."},
+    )
+    out = parse(await reg.call("get_recent_edits", {}))
+    assert out["count"] == 1
+    entry = out["entries"][0]
+    assert entry["file"] == "game/script.rpy"
+    assert "A new line." in entry["diff"]
+    assert "@@" in entry["diff"]  # unified-diff hunk marker
+    assert "added say" in entry["summary"].lower() or "park_scene" in entry["summary"]
+    assert isinstance(entry["timestamp"], (int, float))
+
+
+async def test_get_recent_edits_newest_first_and_limit(write_workspace):
+    _, reg, _ = write_workspace
+    await reg.call(
+        "add_say",
+        {"label": "park_scene", "character": "e", "text": "first"},
+    )
+    await reg.call(
+        "add_say",
+        {"label": "park_scene", "character": "e", "text": "second"},
+    )
+    full = parse(await reg.call("get_recent_edits", {}))
+    assert full["count"] == 2
+    assert "second" in full["entries"][0]["diff"]
+    assert "first" in full["entries"][1]["diff"]
+
+    capped = parse(await reg.call("get_recent_edits", {"limit": 1}))
+    assert capped["count"] == 1
+    assert "second" in capped["entries"][0]["diff"]
+
+
+async def test_get_recent_edits_skips_no_op(write_workspace):
+    cfg, reg, _ = write_workspace
+    target = cfg.project_root / "game/script.rpy"
+    same = target.read_text()
+    # Re-write the same content via apply_write directly — this is a no-op
+    # path; the buffer should remain empty.
+    from renpy_mcp.project.scanner import ProjectIndex
+    from renpy_mcp.project.writer import apply_write
+
+    idx = ProjectIndex(cfg)
+    apply_write(cfg, idx, "game/script.rpy", same)
+    out = parse(await reg.call("get_recent_edits", {}))
+    assert out["count"] == 0

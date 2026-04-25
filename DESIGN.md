@@ -206,6 +206,12 @@ touches disk. It runs, in order:
    pre-write content, returned in every tool's response.
 9. **Index refresh** — the `ProjectIndex` re-scans so subsequent reads
    see the change.
+10. **Recent-edits ring buffer** — every successful (non-no-op) write
+    is recorded into `project/recent.py`'s process-local deque (max 50)
+    with timestamp, file, summary, and diff. Powers the
+    `get_recent_edits` Tier 1 tool. The GUI maintains its own richer
+    buffer (`gui/backend/.../recent.py`) that distinguishes its own
+    writes from external ones the watcher saw.
 
 Every tool that mutates bytes — whether Tier 2, Tier 3, or Tier 4 —
 must end with an `apply_write` call. Usually via the `write_response`

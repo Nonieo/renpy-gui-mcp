@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from .graph import compute_branch_graph
 from .mcp_client import RenpyMcpClient
 from .watcher import FileEvent, ProjectWatcher
+from . import recent as recent_buffer
 
 log = logging.getLogger("renpy_mcp_gui.app")
 
@@ -204,7 +205,8 @@ def _make_lifespan(project_root: Path, sdk_root: Path):
 
 
 def _self_write_observer(_name: str, payload: dict[str, Any]) -> None:
-    """Mark every file an internal write touched so the watcher skips its echo.
+    """Mark every file an internal write touched so the watcher skips its echo,
+    and record the write in the GUI's recent-edits buffer with origin="gui".
 
     Single-file writes (Tier 2 primitives, most Tier 3 intents) return a
     top-level `file`. Multi-file writes (e.g. `add_minigame_screen_scaffold`)
@@ -214,9 +216,14 @@ def _self_write_observer(_name: str, payload: dict[str, Any]) -> None:
     """
     if not isinstance(payload, dict) or "error" in payload:
         return
+    summary = payload.get("summary") if isinstance(payload.get("summary"), str) else ""
     rel = payload.get("file")
     if isinstance(rel, str) and rel:
         state.watcher.mark_self_write(rel)
+        # No-op writes return file but no diff — keep them out of the buffer.
+        if not payload.get("no_op"):
+            diff = payload.get("diff") if isinstance(payload.get("diff"), str) else ""
+            recent_buffer.record(file=rel, origin="gui", summary=summary, diff=diff)
     diffs = payload.get("diffs")
     if isinstance(diffs, list):
         for entry in diffs:
@@ -224,14 +231,27 @@ def _self_write_observer(_name: str, payload: dict[str, Any]) -> None:
                 f = entry.get("file")
                 if isinstance(f, str) and f:
                     state.watcher.mark_self_write(f)
+                    if not entry.get("no_op"):
+                        recent_buffer.record(
+                            file=f,
+                            origin="gui",
+                            summary=summary,
+                            diff=entry.get("diff") if isinstance(entry.get("diff"), str) else "",
+                        )
 
 
 async def _fanout_file_events() -> None:
-    """Forward watcher events to every connected WebSocket client."""
+    """Forward watcher events to every connected WebSocket client and
+    record them in the GUI's recent-edits buffer with origin="agent"."""
     try:
         while True:
             evt: FileEvent = await state.watcher.queue.get()
             payload = json.dumps({"type": "file_change", "kind": evt.kind, "action": evt.action, "path": evt.path})
+            recent_buffer.record(
+                file=evt.path,
+                origin="agent",
+                summary=f"{evt.action} {evt.path}",
+            )
             for ws in list(state.ws_clients):
                 try:
                     await ws.send_text(payload)
@@ -496,6 +516,11 @@ def build_app(project_root: Path, sdk_root: Path, static_dir: Path | None = None
     @app.post("/api/menu-choices/edit")
     async def update_menu_choice(body: UpdateMenuChoiceBody = Body(...)) -> Any:
         return await state.client.call("update_menu_choice", body.model_dump(exclude_none=True))
+
+    @app.get("/api/recent-edits")
+    async def recent_edits(limit: int | None = None) -> Any:
+        entries = recent_buffer.snapshot(limit=limit)
+        return {"count": len(entries), "entries": [e.to_dict() for e in entries]}
 
     # ---------- preview lifecycle ----------
 

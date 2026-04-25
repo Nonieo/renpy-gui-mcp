@@ -42,7 +42,13 @@ export default function App() {
     <div className="flex h-full">
       <Sidebar active={active} onSelect={setActivePanel} rail={prefs.rail} />
       <div className="flex-1 flex flex-col min-w-0">
-        <Header onOpenPrefs={() => setPrefsOpen(true)} />
+        <Header
+          onOpenPrefs={() => setPrefsOpen(true)}
+          onSelectLabel={(name) => {
+            setActive("story");
+            setSelectedLabel(name);
+          }}
+        />
         <main className="flex-1 min-h-0 bg-canvas flex">
           <div className="flex-1 min-w-0">
             {active === "story" && (

@@ -26,7 +26,7 @@ If options 2 or 3 sound foreign, see [QUICKSTART.md](QUICKSTART.md) —
 it walks through "I've never used any of this" to "I can preview my
 own VN" in about 15 minutes.
 
-For the under-the-hood story (76 MCP tools, four tiers, a single
+For the under-the-hood story (77 MCP tools, four tiers, a single
 guarded write pipeline that keeps every edit lint-clean), keep reading.
 
 ## What it looks like
@@ -128,7 +128,7 @@ older `gui/run.sh /path/to/project /path/to/sdk` still works.
 
 ## Features
 
-- **76 MCP tools across 4 tiers** (74 default + 2 opt-in) — reads,
+- **77 MCP tools across 4 tiers** (75 default + 2 opt-in) — reads,
   introspection, in-process diagnostics, lifecycle (preview / warp /
   drafting / translation scaffolding / distribute), guarded write
   primitives, high-level authoring intents (`new_project` scaffolds a
@@ -312,8 +312,8 @@ end-to-end smoke probes.
 
 ## Status
 
-Alpha. **76 MCP tools** (74 default + 2 opt-in), **333 tests** passing in
-~9 seconds. End-to-end smoke probes:
+Alpha. **77 MCP tools** (75 default + 2 opt-in), **337 tests** passing in
+~10 seconds. End-to-end smoke probes:
 `scripts/integration_drive.py` (40-step in-process drive: scaffold →
 author → diagnose → warp → translate → distribute) and
 `scripts/real_vn_drive.py` (drives a project that ships fal-generated
@@ -341,9 +341,11 @@ Deep dive in [DESIGN.md](DESIGN.md).
 
 ## Tier breakdown
 
-- **Tier 1** (default on) — 26 read tools (introspection, structured
+- **Tier 1** (default on) — 27 read tools (introspection, structured
   label-tree read, choice graph, translation coverage, in-process
-  diagnostics with sidecar suppression) + 7 lifecycle tools
+  diagnostics with sidecar suppression, plus `get_recent_edits` for
+  agent self-query of the per-process write history) + 7 lifecycle
+  tools
   (`launch_preview`, `stop_preview`, `get_preview_status`, `warp_to`,
   `set_drafting_mode`, `generate_translation_scaffolding`,
   `build_distribution`). Lifecycle tools spawn the Ren'Py SDK; the
@@ -418,7 +420,7 @@ python scripts/smoke_test.py \
 ```
 src/renpy_mcp/               # the MCP server
   tools/
-    tier1_read.py            # reads + lint + diagnostics (26 tools)
+    tier1_read.py            # reads + lint + diagnostics (27 tools)
     lifecycle.py             # preview / warp / drafting / build (7 tools)
     tier2_write.py           # guarded write primitives (27 tools)
     tier3_intents.py         # high-level intents (14 tools)
