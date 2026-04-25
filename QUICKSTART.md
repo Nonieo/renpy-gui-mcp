@@ -86,34 +86,62 @@ That script:
 1. Creates the Python virtualenv if it's missing.
 2. Installs `renpy-mcp[gui]` if it's missing.
 3. Builds the editor's frontend if it's missing (one-time, needs `npm`).
-4. Opens **the launcher window**, which asks you for the Ren'Py SDK
-   folder and the project folder. Both choices are remembered for next
-   time, so subsequent launches are one click.
+4. **Runs the launcher in your terminal.** It narrates each step so
+   nothing happens off-screen.
 
-If you'd rather skip the wrapper, after `pip install -e ".[gui]"` you
-can also run `rpbuilder` directly from the activated venv — the
-launcher window is the same.
+The launcher does this:
 
-#### What the launcher looks like
+```
+1. Ren'Py SDK
+─────────────
+  scanning common folders for a Ren'Py SDK…
+  ✓ found 1 SDK(s) on disk:
+    1. /home/you/renpy-sdk
+  Choose an SDK number, or (d)ownload latest from renpy.org,
+  (p)aste a path, (q)uit:
+```
 
-| | |
-|---|---|
-| **Ren'Py SDK** | Browse to the folder named something like `renpy-8.4.2-sdk` (it contains a `renpy.sh` or `renpy.exe`). The launcher validates and shows a green check when it finds one. |
-| **Project** | Pick from your recent projects, browse to an existing one, or click *New project* to create an empty one. The launcher creates the bare `game/script.rpy` so the editor has something to bind to; you'll fill it in from the editor. |
-| **Launch RPBuilder** | Spawns the editor server, opens it in your browser at <http://127.0.0.1:8765>, and dismisses the launcher. Closing the editor window stops the server. |
+If a Ren'Py SDK is sitting in any obvious place — `~/renpy-sdk`,
+`~/Downloads/renpy-8.4.2-sdk`, `~/Desktop/`, `/opt/`, etc. — the
+launcher finds it for you. If nothing's there:
 
-Where the launcher remembers your choices:
+- **`d` — download.** The launcher reaches out to renpy.org, finds the
+  current version, asks you where to install (default
+  `~/renpy-sdk/`), then streams + extracts the archive with a progress
+  bar. The downloaded SDK is saved to your config so you only do this
+  once.
+- **`p` — paste.** Type or paste the full path to an existing SDK
+  folder (the one with `renpy.sh` or `renpy.exe` inside).
+- **`q` — quit.** Cancel the launcher.
+
+Then the project picker:
+
+```
+2. Project
+──────────
+    1. /home/you/games/lighthouse_keeper
+    2. /home/you/games/coffee_shop
+    3. <browse for an existing project>
+    4. <start a new project here>
+```
+
+Recent projects show first; press a number to jump straight in.
+Choosing *new* creates a minimum runnable skeleton at the path you
+specify.
+
+After both choices, the launcher saves them and hands off to the editor
+server. The terminal stays open showing log lines — close it (or hit
+Ctrl-C) to stop the server.
+
+You can also run `rpbuilder` directly from the activated venv after
+`pip install -e ".[gui]"` — same flow.
+
+#### Where the launcher remembers your choices
 
 - Linux/macOS: `~/.config/renpy-mcp/launcher.json`
 - Windows: `%APPDATA%\renpy-mcp\launcher.json`
 
 Plain JSON — edit it by hand if you ever need to.
-
-#### Headless or no GUI toolkit?
-
-Run with `--terminal` (or `RPBUILDER_TERMINAL=1`) for a text-prompt
-version of the same flow. The launcher also auto-falls-back to text
-mode when no display is available.
 
 ### Step 4 — Make something
 

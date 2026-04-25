@@ -105,17 +105,23 @@ build ships with the wheel):
 ```bash
 git clone https://github.com/fracturedring/renpy-mcp && cd renpy-mcp
 gui/launch.sh                       # creates .venv, installs deps,
-                                    # builds frontend, opens launcher
+                                    # builds frontend, runs launcher
 ```
 
-`gui/launch.sh` opens a small **launcher window** that asks for the
-Ren'Py SDK folder and a project. Both selections are remembered in
-`~/.config/renpy-mcp/launcher.json` (or `%APPDATA%` on Windows), so
-subsequent launches are one click. After install you can also run
-`rpbuilder` directly from the activated venv — same launcher.
+`gui/launch.sh` runs the **terminal launcher** that:
 
-Headless? Pass `--terminal` (or set `RPBUILDER_TERMINAL=1`) for a
-text-prompt version. For the bare server without the launcher, the
+- scans your filesystem for a Ren'Py SDK (`~/renpy-sdk`,
+  `~/Downloads/renpy-*-sdk`, `~/Desktop/`, `/opt/`, etc.) and offers
+  the discovered ones,
+- if none exist, offers to download the current SDK from renpy.org
+  (with a progress bar) or to paste a path,
+- maintains a recent-projects list with `<browse>` and `<new>` options,
+- remembers both choices in `~/.config/renpy-mcp/launcher.json` (or
+  `%APPDATA%` on Windows) so subsequent launches need at most a single
+  Enter press.
+
+After install you can also run `rpbuilder` directly from the activated
+venv — same launcher. For the bare server without any picker, the
 older `gui/run.sh /path/to/project /path/to/sdk` still works.
 
 ---
