@@ -212,3 +212,15 @@ async def test_get_recent_edits_skips_no_op(write_workspace):
     apply_write(cfg, idx, "game/script.rpy", same)
     out = parse(await reg.call("get_recent_edits", {}))
     assert out["count"] == 0
+
+
+# ---------- get_media_invariants -----------------------------------------------
+
+
+async def test_get_media_invariants_returns_structured_dict(registry):
+    out = parse(await registry.call("get_media_invariants", {}))
+    assert "image" in out and "audio" in out
+    assert out["image"]["background"]["exact_size"] == [1920, 1080]
+    assert out["image"]["sprite"]["alpha_required"] is True
+    assert "ogg" in out["audio"]["music"]["format"]
+    assert out["doc"].startswith("MEDIA.md")

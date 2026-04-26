@@ -1,0 +1,36 @@
+# hermes-agent MCP server config for renpy-mcp.
+#
+# Merge this block into ~/.hermes/config.yaml under `mcp_servers:`.
+# Replace the absolute paths with your own, or run
+#
+#     renpy-mcp --print-config hermes --sdk /path/to/renpy-sdk
+#
+# to have the server emit the same block with your actual paths filled in.
+#
+# After editing, run `hermes mcp test renpy` to verify the connection —
+# you should see the renpy-mcp tool catalog (75 tools by default).
+
+mcp_servers:
+  renpy:
+    command: "/path/to/renpy-mcp/.venv/bin/python"
+    args:
+      - "-m"
+      - "renpy_mcp"
+      - "--sdk"
+      - "/path/to/renpy-sdk"
+      # Optional: pin a games-root so `new_project` lands consistently.
+      # - "--games-root"
+      # - "/path/to/games"
+      # Optional: tier filter. Default is 1,2,3; add 4 to unlock escape hatches.
+      # - "--tiers"
+      # - "1,2,3"
+    timeout: 180
+    connect_timeout: 60
+
+# Hermes ships a built-in `image_generate` tool (FLUX / fal.ai) — make sure
+# FAL_KEY is set in ~/.hermes/.env so it can run. The renpy-mcp server does
+# not generate images itself; it expects the harness to drop the bytes into
+# <project>/game/images/<name>.png and then register them via the MCP tool
+# `add_image_alias`. add_image_alias will probe the file against MEDIA.md's
+# invariants and return `media_warnings` if dimensions or alpha are wrong;
+# call `get_media_invariants` BEFORE generating to pin the right shape.

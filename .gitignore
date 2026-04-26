@@ -36,3 +36,17 @@ gui/frontend/*.tsbuildinfo
 # server doesn't read .env itself; this is defense in depth.
 .env
 .env.local
+
+# Hermes-agent pipeline test artifacts that are pure SDK-template
+# scaffold or runtime cache. The meaningful outputs (script.rpy + images)
+# are tracked; everything else regenerates from `renpy-mcp new_project`.
+games/default/
+games/*/game/cache/
+games/*/game/saves/
+games/*/game/gui/
+games/*/game/libs/
+games/*/game/gui.rpy
+games/*/game/guisupport.rpy
+games/*/game/options.rpy
+games/*/game/screens.rpy
+games/*/log.txt
