@@ -50,3 +50,7 @@ games/*/game/guisupport.rpy
 games/*/game/options.rpy
 games/*/game/screens.rpy
 games/*/log.txt
+
+# Hermes end-to-end test scratch
+hermes_run.log
+prompt.txt
