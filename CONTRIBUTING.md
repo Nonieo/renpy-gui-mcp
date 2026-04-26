@@ -26,7 +26,7 @@ pytest -q
 ```
 
 The full suite runs in ~16 s with the SDK present (`RENPY_SDK=...`),
-~10 s without (SDK-gated tests skip). 292 tests at time of writing.
+~10 s without (SDK-gated tests skip). 378 tests at time of writing.
 
 For frontend work:
 
@@ -205,7 +205,7 @@ behavior we care about.
   locally before pushing; CI runs both.
 - **Tool surface changes** (new tool, removed tool, schema breaking
   change) should mention the count update in the PR description so
-  README's "74 MCP tools" stays accurate.
+  README's "80 MCP tools" stays accurate.
 - **Documentation-only changes** are great — README, AGENTS, MEDIA,
   this file — they're under the same review bar as code (typos
   count).

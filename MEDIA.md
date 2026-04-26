@@ -259,19 +259,6 @@ piece.
   (`play sound "audio/rain_loop.ogg" loop`) and ideally damp clothes
   on sprites entering from outside.
 
-### Tone matching
-
-| Scene mood | Music tempo | Color | Sprite expression |
-|---|---|---|---|
-| Calm exposition | 60–80 BPM, sparse | Cool desaturated | Neutral |
-| Tension building | 90–120 BPM, drone | Cool with warm intrusion | Concerned |
-| Action / reveal | 140+ BPM, sting | Saturated, high contrast | Surprised / shock |
-| Romance | 70–90 BPM, melodic | Warm pastel | Happy / embarrassed |
-| Grief | 50–70 BPM, piano | Desaturated near-monochrome | Tearful / hollow |
-
-You don't need to match every column on every line — but if at least
-two columns agree, the scene reads correctly.
-
 ---
 
 ## Naming conventions (with examples)
@@ -353,24 +340,10 @@ stall.
 
 ## Common mistakes to avoid
 
-- **Mixing image styles.** Anime sprites on a photorealistic background
-  reads as wrong even to non-VN players. Pick one style; the player's
-  brain will fill in the gaps if you're consistent.
-- **Sprites with painted-in backgrounds.** Always alpha. Always.
-- **JPG sprites.** No alpha channel — you'll see the white background
-  when the sprite shows.
-- **Backgrounds with characters in them.** The sprite layered on top
-  produces a "two of them?" reading.
-- **Music that overwhelms dialogue.** Mix BGM 6–12 dB below your VA
-  reference. If unsure, use a reference VN (the Steam demo of any
-  popular VN) and A/B.
-- **Matching neither tempo nor color to scene mood.** A romance scene
-  with a 140-BPM action track plus harsh blue lighting reads as
-  parody.
-- **Naming sprites with hyphens or special chars.** `eileen-happy.png`
-  becomes image `eileen-happy` (one token); you can't use `show
-  eileen happy` to call it.
-- **Distributing without slug-safe `build.name`.** Ren'Py rejects
+The four invariants above catch most asset-shape errors. A few that
+aren't elsewhere:
+
+- **Distributing without a slug-safe `build.name`.** Ren'Py rejects
   `build.directory_name` containing spaces, colons, or semicolons.
   The renpy-mcp scaffold slugifies automatically; if you author
   `options.rpy` by hand, use lowercase-underscore.

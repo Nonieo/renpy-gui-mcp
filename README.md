@@ -322,21 +322,19 @@ call. No explicit coordination — the file system is the integration point.
 
 ### Panel status
 
-| Panel | State | What it does |
-|---|---|---|
-| Story Map | Working | Port-based editable graph (drag-to-rearrange, drag-to-connect, kind badges, persisted positions via `read_canvas_positions` / `set_canvas_positions`); toolbar adds Scene / Choice / Ending; Backspace deletes via `delete_label` with reference-aware refusal |
-| Choice View | Working | Player-perspective derived filter — every top-level `menu:` rendered as choice pills + `if`-guard badges; click target → opens label in Inspector |
-| Scene Inspector | Working | Right-docked panel; consumes `read_label_tree` and renders the full ordered event stream (say · scene · show · hide · play · stop · pause · jump · call · return · with · set · menu · if). Inline forms edit background / music / dialogue and insert any of the five Phase 4 events (pause, setvar, show, with-effect, flash) |
-| Characters | Working | Card grid + edit drawer (`add_character` / `update_character`) |
-| Assets | Working | Tabbed Backgrounds / Sprites / Music / SFX from `list_images` + `list_audio`; usage-count badges |
-| Variables | Working | Table view; inline edit on `default` rows (`set_variable_default`); "+ New default" modal |
-| Music | Working | Per-scene music table (joined from `list_audio` plays); inline edit via `set_scene_music`; music-library list |
-| Mini-Games | Working | Lists scaffolded minigames (screen + label pairs); "+ New scaffold" modal calls `add_minigame_screen_scaffold` |
-| Languages | Working | Per-language coverage bars from `get_translation_coverage`; click a row → stale-string list from `find_stale_translations`; "+ Scaffold" runs `generate_translation_scaffolding` |
-| Composers | Working | Four sections in one panel: Screen Layout (JSON tree → `screen` block), Stage (label + bg + sprite rows + transition), ImageMap (ground + hover + hotspot rows), Menu (label + choice rows). Each calls its matching Tier 3 tool |
-| Build | Working | `get_lint_report` runner with severity-coded findings + summary cards + raw-output viewer; Distribute section with per-platform target picker calling `build_distribution` |
-| Preview button | Working | Header; toggles `launch_preview` / `stop_preview`; polls every 2s so external state changes (LLM-triggered) sync without refresh |
-| Animations | Stub | Deliberate — Ren'Py's ATL doesn't fit a multi-track timeline cleanly |
+The left rail collapsed to four panels in Phase 2; each composes the
+narrower views that used to be top-level rail entries.
+
+| Rail panel | What it does |
+|---|---|
+| Story | Story Map (port-based editable graph — drag-to-rearrange, drag-to-connect, kind badges, persisted positions via `read_canvas_positions` / `set_canvas_positions`; toolbar adds Scene / Choice / Ending; Backspace deletes via `delete_label`) and Choice View (derived player perspective — every top-level `menu:` rendered as choice pills + `if`-guard badges) toggled by a mode pill. Selecting a node opens the right-docked Scene Inspector, which renders `read_label_tree` as typed event cards (say · scene · show · hide · play · stop · pause · jump · call · return · with · set · menu · if) with inline insert affordances and overlay Stage / Menu composers. |
+| Library | Tabbed: Characters (`add_character` / `update_character`), Assets (Backgrounds / Sprites / Music / SFX from `list_images` + `list_audio` with usage-count badges), Variables (inline edit on `default` rows via `set_variable_default`), Screens (screen blocks plus the Screen Layout and ImageMap composers), Mini-Games (scaffolded screen+label pairs via `add_minigame_screen_scaffold`). |
+| Localization | Per-language coverage bars from `get_translation_coverage`; click a row for the stale-string list from `find_stale_translations`; "+ Scaffold" runs `generate_translation_scaffolding`. |
+| Ship | `get_lint_report` runner with severity-coded findings + raw-output viewer, plus per-platform `build_distribution` targets. |
+
+The header carries the Preview toggle (`launch_preview` / `stop_preview`,
+polled every 2s so external state changes sync without refresh), the
+watcher pill, the Recent disclosure, and the ambient lint badge.
 
 ### Themed shell
 
@@ -360,7 +358,7 @@ end-to-end smoke probes.
 
 ## Status
 
-Alpha. **80 MCP tools** (78 default + 2 opt-in), **337 tests** passing in
+Alpha. **80 MCP tools** (78 default + 2 opt-in), **378 tests** passing in
 ~10 seconds. End-to-end smoke probes:
 `scripts/integration_drive.py` (40-step in-process drive: scaffold →
 author → diagnose → warp → translate → distribute) and
@@ -471,10 +469,10 @@ python scripts/smoke_test.py \
 ```
 src/renpy_mcp/               # the MCP server
   tools/
-    tier1_read.py            # reads + lint + diagnostics (27 tools)
+    tier1_read.py            # reads + lint + diagnostics (29 tools)
     lifecycle.py             # preview / warp / drafting / build (7 tools)
     tier2_write.py           # guarded write primitives (27 tools)
-    tier3_intents.py         # high-level intents (14 tools)
+    tier3_intents.py         # high-level intents (15 tools)
     tier4_escape.py          # escape hatches (2 tools, opt-in)
     _shared.py               # helpers reused across tiers
     registry.py              # single dispatch point
