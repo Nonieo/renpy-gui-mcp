@@ -26,7 +26,7 @@ If options 2 or 3 sound foreign, see [QUICKSTART.md](QUICKSTART.md) —
 it walks through "I've never used any of this" to "I can preview my
 own VN" in about 15 minutes.
 
-For the under-the-hood story (79 MCP tools, four tiers, a single
+For the under-the-hood story (80 MCP tools, four tiers, a single
 guarded write pipeline that keeps every edit lint-clean), keep reading.
 
 ## What it looks like
@@ -99,15 +99,27 @@ hermes-agent, Cursor, or any MCP client):
 
 ```bash
 pip install git+https://github.com/fracturedring/renpy-mcp
-renpy-mcp --sdk /path/to/renpy-sdk
+renpy-mcp --fetch-sdk        # downloads Ren'Py SDK to ~/.cache/renpy-mcp/
+renpy-mcp                    # auto-picks the cached SDK; no flags needed
 ```
 
-`--project` is optional. When omitted, the server works against
+`--fetch-sdk` is optional — pass `--sdk /path/to/renpy-sdk` (or set
+`$RENPY_SDK`) if you already have the SDK installed. Pin a specific
+version with `--fetch-sdk --sdk-version 8.6.0`.
+
+`--project` is also optional. When omitted, the server works against
 `<cwd>/games/default/` and auto-scaffolds it on first run, so a fresh
-conversation drops into a runnable starting state. Set `$RENPY_SDK`
-instead of `--sdk` if you prefer. Agents should call `new_project` at
-the start of a conversation to get their own named subfolder — see
-[AGENTS.md](AGENTS.md) for the happy-path flow.
+conversation drops into a runnable starting state. Agents should call
+`new_project` at the start of a conversation to get their own named
+subfolder — see [AGENTS.md](AGENTS.md) for the happy-path flow.
+
+For ready-to-paste MCP-server configs that fill in your local install's
+absolute paths, run:
+
+```bash
+renpy-mcp --print-config claude-code  # emits .mcp.json
+renpy-mcp --print-config hermes       # emits ~/.hermes/config.yaml block
+```
 
 **With the RPBuilder GUI** (requires a repo checkout until the frontend
 build ships with the wheel):
@@ -138,7 +150,7 @@ older `gui/run.sh /path/to/project /path/to/sdk` still works.
 
 ## Features
 
-- **79 MCP tools across 4 tiers** (77 default + 2 opt-in) — reads,
+- **80 MCP tools across 4 tiers** (78 default + 2 opt-in) — reads,
   introspection, in-process diagnostics, lifecycle (preview / warp /
   drafting / translation scaffolding / distribute), guarded write
   primitives, high-level authoring intents (`new_project` scaffolds a
@@ -258,8 +270,15 @@ harness-level include/exclude:
 }
 ```
 
-Or load only specific tiers at the server level: `--tiers 1,3` excludes
-Tier 2 entirely so small models see fewer overlapping options.
+Or load only specific tiers at the server level. Three useful presets:
+
+- `--tiers 1,3` — **recommended for small models.** Reads + high-level
+  intents only (43 tools); no Tier 2 primitives competing with the
+  composers. Tier 3 internally uses the writer pipeline directly, so
+  authoring still works end-to-end.
+- `--tiers 1,2,3` — default. Everything except the escape hatches.
+- `--tiers 1,2,3,4` — adds `apply_unified_diff` and `exec_python_in_init`
+  for cases the structured tools can't express.
 
 Image generation is **not** part of this server — hermes ships a fal
 image tool built in (`image_generate`, requires `FAL_KEY`). The flow is:
@@ -341,7 +360,7 @@ end-to-end smoke probes.
 
 ## Status
 
-Alpha. **79 MCP tools** (77 default + 2 opt-in), **337 tests** passing in
+Alpha. **80 MCP tools** (78 default + 2 opt-in), **337 tests** passing in
 ~10 seconds. End-to-end smoke probes:
 `scripts/integration_drive.py` (40-step in-process drive: scaffold →
 author → diagnose → warp → translate → distribute) and
@@ -370,7 +389,7 @@ Deep dive in [DESIGN.md](DESIGN.md).
 
 ## Tier breakdown
 
-- **Tier 1** (default on) — 28 read tools (introspection, structured
+- **Tier 1** (default on) — 29 read tools (introspection, structured
   label-tree read, choice graph, translation coverage, in-process
   diagnostics with sidecar suppression, plus `get_recent_edits` for
   agent self-query of the per-process write history) + 7 lifecycle

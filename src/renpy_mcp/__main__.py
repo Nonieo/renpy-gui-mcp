@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from .config import DEFAULT_GAMES_SUBDIR, DEFAULT_PROJECT_SLUG, DEFAULT_TIERS, ServerConfig
+from .project import sdk_fetch
 from .project.scaffold import scaffold_project
 from .server import run_stdio
 
@@ -34,9 +35,19 @@ def _parse_tiers(raw: str) -> frozenset[int]:
 
 
 def _default_sdk() -> Path | None:
-    """Return the SDK path from $RENPY_SDK if set, else None."""
+    """Return the SDK path from $RENPY_SDK, the local cache, or None.
+
+    Lookup order:
+        1. $RENPY_SDK (explicit user choice).
+        2. The most-recent SDK previously placed in the cache by
+           `renpy-mcp --fetch-sdk`. Lets users run `--fetch-sdk` once
+           and never need to set the env var.
+    """
     env = os.environ.get("RENPY_SDK")
-    return Path(env).resolve() if env else None
+    if env:
+        return Path(env).resolve()
+    cached = sdk_fetch.cached_sdk()
+    return cached.resolve() if cached else None
 
 
 def main() -> int:
@@ -88,10 +99,31 @@ def main() -> int:
             "emits the YAML block to merge into ~/.hermes/config.yaml."
         ),
     )
+    parser.add_argument(
+        "--fetch-sdk",
+        action="store_true",
+        help=(
+            "Download a Ren'Py SDK into ~/.cache/renpy-mcp/sdk-<version> "
+            "(or $RENPY_MCP_SDK_CACHE) and exit. Subsequent `renpy-mcp` "
+            "invocations pick the cached SDK up automatically when --sdk "
+            "and $RENPY_SDK are unset. Combine with --sdk-version to pin."
+        ),
+    )
+    parser.add_argument(
+        "--sdk-version",
+        default=None,
+        help=(
+            "Version string for --fetch-sdk (e.g. `8.6.0`). Default: probe "
+            "renpy.org for the highest 8.x release."
+        ),
+    )
     args = parser.parse_args()
 
     if args.print_config:
         return _print_harness_config(args)
+    if args.fetch_sdk:
+        _configure_logging(args.verbose)
+        return _fetch_sdk_cli(args)
 
     _configure_logging(args.verbose)
     log = logging.getLogger("renpy_mcp")
@@ -176,8 +208,9 @@ def _print_harness_config(args: argparse.Namespace) -> int:
         print(json.dumps(snippet, indent=2))
         if sdk is None:
             print(
-                "// NOTE: --sdk was omitted; set $RENPY_SDK in your shell or "
-                "rerun with --sdk PATH so the server can find Ren'Py.",
+                "// NOTE: --sdk was omitted; set $RENPY_SDK, run "
+                "`renpy-mcp --fetch-sdk` once to populate the cache, "
+                "or rerun --print-config with --sdk PATH.",
                 file=sys.stderr,
             )
         return 0
@@ -195,10 +228,28 @@ def _print_harness_config(args: argparse.Namespace) -> int:
     print("    connect_timeout: 60")
     if sdk is None:
         print(
-            "# NOTE: --sdk was omitted; set $RENPY_SDK in hermes' .env or "
-            "re-run print-config with --sdk PATH.",
+            "# NOTE: --sdk was omitted; set $RENPY_SDK in hermes' .env, run "
+            "`renpy-mcp --fetch-sdk` once to populate the cache, or re-run "
+            "print-config with --sdk PATH.",
             file=sys.stderr,
         )
+    return 0
+
+
+def _fetch_sdk_cli(args: argparse.Namespace) -> int:
+    """Run `--fetch-sdk` end-to-end and print the resolved SDK path."""
+    log = logging.getLogger("renpy_mcp")
+    try:
+        result = sdk_fetch.fetch_sdk(version=args.sdk_version)
+    except sdk_fetch.SDKFetchError as exc:
+        log.error("fetch-sdk failed: %s", exc)
+        return 2
+    if result.cached:
+        log.info("Ren'Py SDK %s already cached at %s", result.version, result.sdk_path)
+    else:
+        log.info("Ren'Py SDK %s installed at %s", result.version, result.sdk_path)
+    # stdout receives the path so shell pipelines can capture it.
+    print(result.sdk_path)
     return 0
 
 
