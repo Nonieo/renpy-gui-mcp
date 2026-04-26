@@ -169,9 +169,9 @@ sprites at once), and image-map menus when you want them.
 
 ### Stuck?
 
-- The browser shows nothing? Make sure `gui/run.sh` is still running
+- The browser shows nothing? Make sure `gui/launch.sh` is still running
   in your terminal. Closing the terminal closes the editor.
-- "Preview" button does nothing? Check the terminal where `gui/run.sh`
+- "Preview" button does nothing? Check the terminal where `gui/launch.sh`
   is running for errors. Usually the SDK path is wrong.
 - The lint button under **Build** shows red errors? Click on each
   error — it'll tell you what's wrong. Usually it's a typo in a label
@@ -191,8 +191,7 @@ Protocol). Currently working ones:
   CLI, works on macOS / Linux / Windows.
 - [Cursor](https://cursor.sh) — code editor with a built-in AI
   panel that supports MCP.
-- [hermes-agent](https://github.com/anthropics/hermes-agent) — a
-  CLI orchestrator.
+- hermes-agent — a CLI orchestrator from NousResearch.
 
 ### Step 1 — Set up Path A first
 
@@ -220,7 +219,7 @@ For Claude Code, in the project directory create a file called
 ```
 
 Replace the three paths with real ones. Claude Code will detect this
-file when it starts and your AI session will have access to all 72
+file when it starts and your AI session will have access to all 80
 renpy-mcp tools (named `mcp__renpy__add_say`, `mcp__renpy__create_scene`,
 and so on).
 
@@ -300,29 +299,9 @@ GUI and AI both create new ones via the **`new_project`** action.
 
 ---
 
-## Common first-week questions
+## Licensing note
 
-**"What's an MCP?"**
-Model Context Protocol — a standard way for AI assistants to talk to
-external programs. Anthropic introduced it in late 2024. Think of it
-as "USB for AI tools." renpy-mcp is one of those external programs;
-it speaks the standard so any MCP-aware AI can use it.
-
-**"Do I need to know Python?"**
-No. The GUI requires zero code. Even Path B / Path C, you only type
-English at the AI.
-
-**"Do I need an internet connection?"**
-For the GUI, no. For an AI assistant, yes — most run in the cloud
-(Claude, GPT). Local AI models can also speak MCP but quality varies.
-
-**"Can I make money from a VN built with this?"**
-Yes — Ren'Py is BSD-licensed (commercially permissive). renpy-mcp is
-AGPL-3.0; the games you produce with it are yours to license however
-you like. The AGPL only matters if you fork or run renpy-mcp itself
-as a hosted service.
-
-**"What if I don't like a scene the AI made?"**
-Edit it in the GUI. Or tell the AI to redo it. Or ask the AI to
-delete that label and start over. None of the changes are permanent
-until you decide to commit them somewhere.
+Ren'Py is BSD-licensed; the VNs you produce with it are yours to
+license however you want. renpy-mcp itself is AGPL-3.0 — that only
+constrains you if you fork the server or run it as a hosted service
+for other people.

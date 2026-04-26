@@ -117,10 +117,16 @@ defaults to those three; Tier 4 is opt-in-only).
 
 ### Tier 1 — read + lifecycle (always safe)
 
-16 tools: project overview, label/character/image/audio/variable/screen
-listing, per-entity read, reference search, raw file read, lint report,
-preview launch / stop / status. Never writes bytes. Safe to expose to any
-model without filtering.
+29 read tools + 7 lifecycle tools: project overview,
+label/character/image/audio/variable/screen listing, per-entity read,
+reference search, raw file read, structured label-tree, choice graph,
+translation coverage, the in-process `find_*` diagnostics,
+`get_recent_edits`, `get_media_invariants`, `get_scaffold_status`,
+`get_lint_report`, plus lifecycle: `launch_preview`, `stop_preview`,
+`get_preview_status`, `warp_to`, `set_drafting_mode`,
+`generate_translation_scaffolding`, `build_distribution`. The reads
+never write bytes; the lifecycle tools spawn the Ren'Py SDK but never
+mutate `.rpy` content.
 
 ### Tier 2 — guarded write primitives (one statement per tool)
 
@@ -356,7 +362,7 @@ decision in the repo — see the root README for the rationale.
   resulting `.rpy` and assert on the bytes (not the diff), plus
   re-snapshot the index to confirm the new content parses back cleanly.
 
-The suite runs in ~9 seconds (123 tests at time of writing). Keep it
+The suite runs in ~10 seconds (378 tests at time of writing). Keep it
 that way: avoid fixtures that spawn real subprocesses when a mock will
 do. The lifecycle tests monkey-patch `asyncio.create_subprocess_exec` to
 spawn `sleep 30` instead of the real SDK, for example.
@@ -397,10 +403,6 @@ These are recorded in approximate priority order. None are blocked on
 anything but capacity. For larger directional bets (IDE-shaped features
 informed by Vangard / Ren'IDE), see [ROADMAP.md](ROADMAP.md).
 
-- **`build_distribution` MCP tool + Export button** — wraps
-  `renpy.sh distribute`; unblocks the Build panel's Export tile.
-- **`renpy.music.set_volume()` tool** — Tier 2 primitive; unblocks the
-  Music panel's mixer card.
 - **Delete-file tool** — once present, `apply_unified_diff` can drop
   its `+++ /dev/null` refusal.
 - **Rename-label follow-through** — existing `rename_label` tool
