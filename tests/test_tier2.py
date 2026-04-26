@@ -508,6 +508,152 @@ async def test_add_image_alias_validates_asset(workspace):
     assert "asset file does not exist" in out["error"]
 
 
+def _write_minimal_png(path, *, width: int, height: int, color_type: int) -> None:
+    """Write a header-only PNG with the requested dimensions / color type.
+
+    Color types: 2=RGB (no alpha), 6=RGBA. The IDAT body is the minimum
+    valid empty-IDAT zlib stream so file readers don't choke on a 0-byte
+    image — but the probe only reads the IHDR, so the body could be junk.
+    """
+    import struct
+    import zlib
+
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr_payload = struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0)
+    ihdr_crc = zlib.crc32(b"IHDR" + ihdr_payload)
+    ihdr = struct.pack(">I", len(ihdr_payload)) + b"IHDR" + ihdr_payload + struct.pack(">I", ihdr_crc)
+    # Empty IDAT: zlib-compress a single zero byte so PIL-likes don't err.
+    idat_data = zlib.compress(b"\x00")
+    idat_crc = zlib.crc32(b"IDAT" + idat_data)
+    idat = struct.pack(">I", len(idat_data)) + b"IDAT" + idat_data + struct.pack(">I", idat_crc)
+    iend_crc = zlib.crc32(b"IEND")
+    iend = struct.pack(">I", 0) + b"IEND" + struct.pack(">I", iend_crc)
+    path.write_bytes(sig + ihdr + idat + iend)
+
+
+async def test_add_image_alias_warns_on_undersized_background(workspace):
+    """A 1024x576 background trips a MEDIA.md warning about the screen-size
+    mismatch. The write still lands — warning is non-blocking."""
+    cfg, reg, _ = workspace
+    _write_minimal_png(
+        cfg.project_root / "game" / "images" / "bg_small.png",
+        width=1024,
+        height=576,
+        color_type=2,
+    )
+    out = parse(
+        await reg.call(
+            "add_image_alias",
+            {"name": "bg small", "asset": "images/bg_small.png"},
+        )
+    )
+    assert "added `image bg small`" in out["summary"]
+    assert out["no_op"] is False
+    assert "media_warnings" in out
+    assert any("1024x576" in w and "1920x1080" in w for w in out["media_warnings"])
+
+
+async def test_add_image_alias_warns_on_sprite_without_alpha(workspace):
+    """A 1080-tall RGB PNG passes the height check but fails the alpha
+    requirement — MEDIA.md says sprites must sit on transparency."""
+    cfg, reg, _ = workspace
+    _write_minimal_png(
+        cfg.project_root / "game" / "images" / "selkie_neutral.png",
+        width=600,
+        height=1080,
+        color_type=2,  # RGB, no alpha
+    )
+    out = parse(
+        await reg.call(
+            "add_image_alias",
+            {"name": "selkie neutral", "asset": "images/selkie_neutral.png"},
+        )
+    )
+    warnings = out.get("media_warnings", [])
+    assert any("alpha channel" in w for w in warnings), warnings
+    # Height 1080 matches the screen height, so no height warning.
+    assert not any("height" in w for w in warnings), warnings
+
+
+async def test_add_image_alias_no_media_warnings_for_compliant_sprite(workspace):
+    """Correctly-shaped RGBA sprite produces no media warnings."""
+    cfg, reg, _ = workspace
+    _write_minimal_png(
+        cfg.project_root / "game" / "images" / "mei_happy.png",
+        width=600,
+        height=1080,
+        color_type=6,  # RGBA
+    )
+    out = parse(
+        await reg.call(
+            "add_image_alias",
+            {"name": "mei happy", "asset": "images/mei_happy.png"},
+        )
+    )
+    assert "media_warnings" not in out
+
+
+async def test_add_image_alias_skip_media_check_silences_warnings(workspace):
+    """`skip_media_check: true` is the escape hatch for assets that
+    intentionally deviate (UI overlays, intro splashes)."""
+    cfg, reg, _ = workspace
+    _write_minimal_png(
+        cfg.project_root / "game" / "images" / "bg_off.png",
+        width=800,
+        height=600,
+        color_type=2,
+    )
+    out = parse(
+        await reg.call(
+            "add_image_alias",
+            {
+                "name": "bg off",
+                "asset": "images/bg_off.png",
+                "skip_media_check": True,
+            },
+        )
+    )
+    assert "media_warnings" not in out
+
+
+async def test_add_image_alias_role_override_reclassifies(workspace):
+    """A 1024x576 image named `splash_intro` is treated as a sprite by
+    inference (no `bg`/`cg` tag) — but caller can pin it to `background`
+    via `role` to apply background invariants instead."""
+    cfg, reg, _ = workspace
+    _write_minimal_png(
+        cfg.project_root / "game" / "images" / "splash_intro.png",
+        width=1024,
+        height=576,
+        color_type=2,  # RGB; no alpha
+    )
+    inferred = parse(
+        await reg.call(
+            "add_image_alias",
+            {"name": "splash intro", "asset": "images/splash_intro.png"},
+        )
+    )
+    inferred_warnings = inferred.get("media_warnings", [])
+    # Sprite role complains about no-alpha + height 576 != 1080.
+    assert any("alpha channel" in w for w in inferred_warnings), inferred_warnings
+    assert any("height" in w for w in inferred_warnings), inferred_warnings
+
+    overridden = parse(
+        await reg.call(
+            "add_image_alias",
+            {
+                "name": "splash intro2",
+                "asset": "images/splash_intro.png",
+                "role": "background",
+            },
+        )
+    )
+    overridden_warnings = overridden.get("media_warnings", [])
+    # Background role complains about dimensions only; alpha is irrelevant.
+    assert any("1024x576" in w for w in overridden_warnings), overridden_warnings
+    assert not any("alpha channel" in w for w in overridden_warnings), overridden_warnings
+
+
 # ---------- add_character / update_character -----------------------------------
 
 

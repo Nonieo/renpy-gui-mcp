@@ -25,6 +25,9 @@ from ..project.label_tree import (
     parse_label_body,
     parse_label_from_disk,
 )
+from ..project.lint_parse import parse_lint_output
+from ..project.media import MEDIA_INVARIANTS
+from ..project import scaffold_status
 from ..project import recent as recent_buffer
 from ..project.translations import (
     coverage_summary,
@@ -73,6 +76,8 @@ def register(registry: ToolRegistry, config: ServerConfig, index: ProjectIndex) 
     registry.add(_get_translation_coverage(config))
     registry.add(_find_stale_translations(config))
     registry.add(_get_recent_edits())
+    registry.add(_get_media_invariants())
+    registry.add(_get_scaffold_status(config, index))
 
 
 # ---------- get_project_overview ------------------------------------------------
@@ -693,35 +698,64 @@ def _read_raw_file(config: ServerConfig) -> ToolDef:
 
 
 def _get_lint_report(config: ServerConfig) -> ToolDef:
-    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+    schema = {
+        "type": "object",
+        "properties": {
+            "include_raw": {
+                "type": "boolean",
+                "default": True,
+                "description": (
+                    "Include the raw lint stdout/stderr alongside the parsed "
+                    "findings. Default true — some agents prefer to see the "
+                    "original text. Set false to shrink the response when "
+                    "iterating fast."
+                ),
+            },
+        },
+        "additionalProperties": False,
+    }
 
-    # Lint output ends with a summary line of the form
-    #   "1 errors, 2 warnings, 3 informational messages, 4 obsolete creator..."
-    # Capture it for a quick at-a-glance answer; the agent can read full output too.
-    summary_re = re.compile(r"^[\d,]+\s+errors?.*", re.MULTILINE)
-
-    async def handler(_arguments: dict[str, Any]) -> list[types.TextContent]:
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        include_raw: bool = bool(arguments.get("include_raw", True))
         try:
             result = await renpy_sdk.run_lint(config.sdk_root, config.project_root)
         except Exception as exc:
             return _err(f"failed to invoke renpy.sh lint: {exc}")
-        m = summary_re.search(result.stdout)
-        return _ok(
-            {
-                "returncode": result.returncode,
-                "summary": m.group(0).strip() if m else None,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-            }
-        )
+
+        parsed = parse_lint_output(result.stdout)
+        # `clean` is the most actionable bit: agents can early-exit
+        # their fix loop when this flips True. It's stricter than
+        # `returncode == 0` because Ren'Py exits 0 even with warnings.
+        summary = parsed["summary"] or {"errors": 0, "warnings": 0, "info": 0, "obsolete": 0}
+        clean = summary.get("errors", 0) == 0 and summary.get("warnings", 0) == 0
+
+        payload: dict[str, Any] = {
+            "returncode": result.returncode,
+            "clean": clean,
+            "findings": parsed["findings"],
+            "findings_count": len(parsed["findings"]),
+            "advisories": parsed["advisories"],
+            "summary": summary,
+            "summary_line": parsed["summary_line"],
+        }
+        if include_raw:
+            payload["stdout"] = result.stdout
+            payload["stderr"] = result.stderr
+            payload["statistics"] = parsed["statistics"]
+        return _ok(payload)
 
     return ToolDef(
         name="get_lint_report",
         description=(
-            "Run Ren'Py's built-in `lint` command over the project and return its "
-            "stdout, stderr, exit code, and the one-line summary at the bottom. "
+            "Run Ren'Py's built-in `lint` command and return both the parsed "
+            "findings (`{rule, severity, file, line, message}` — same shape as "
+            "the `find_*` diagnostics) and the raw stdout/stderr. The top-level "
+            "`clean` field flips True when there are zero errors AND zero "
+            "warnings — agents use it to early-exit a fix loop. Severity is "
+            "inferred from message wording (lint itself does not tag findings). "
             "Slow (a couple of seconds for small projects); call after writes "
-            "or when investigating runtime issues, not as a routine probe."
+            "or when investigating runtime issues, not as a routine probe. Pass "
+            "`include_raw: false` to skip the raw stdout/stderr."
         ),
         input_schema=schema,
         handler=handler,
@@ -1386,6 +1420,65 @@ def _get_recent_edits() -> ToolDef:
             "agent self-correction after a multi-step edit. Per-process buffer "
             "of the last 50 writes; a separate `renpy-mcp` instance (e.g. the "
             "GUI's own subprocess) has its own buffer."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- get_scaffold_status ------------------------------------------------
+
+
+def _get_scaffold_status(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    """Report what's authored vs. still SDK-template placeholder."""
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def handler(_arguments: dict[str, Any]) -> list[types.TextContent]:
+        return _ok(scaffold_status.evaluate(config, index))
+
+    return ToolDef(
+        name="get_scaffold_status",
+        description=(
+            "Heuristic readout of how scaffolded the project still is: is "
+            "`label start:` wired with a `jump`, are SDK template phrases "
+            "(\"You've created a new Ren'Py game\") still present anywhere, "
+            "are there route stubs whose body is only a TODO comment, is "
+            "`config.name` still the template default, are the "
+            "distribution-breaking template leftovers fixed. Returns a "
+            "`fresh: bool` flag plus the standard findings shape with a "
+            "`fix_hint` per finding telling the agent which tool to call. "
+            "Cheap pure read; safe to run between writes."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- get_media_invariants -----------------------------------------------
+
+
+def _get_media_invariants() -> ToolDef:
+    """Return MEDIA.md's "four invariants" as a structured JSON shape.
+
+    Cheaper for an agent to consume than re-reading the prose every turn.
+    The dict mirrors `add_image_alias`'s compliance checks: anything that
+    the warnings flag is encoded here. Read this BEFORE generating images,
+    not after.
+    """
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def handler(_arguments: dict[str, Any]) -> list[types.TextContent]:
+        return _ok(MEDIA_INVARIANTS)
+
+    return ToolDef(
+        name="get_media_invariants",
+        description=(
+            "Return the structured form of MEDIA.md's compatibility rules: "
+            "expected format / size / alpha for backgrounds, sprites, CGs, "
+            "UI; expected format / duration for music, voice, SFX, ambience; "
+            "filename naming rules; directory layout. Call this BEFORE asking "
+            "your image-generation tool for assets, so you can pin the right "
+            "dimensions and ensure sprites come out with alpha."
         ),
         input_schema=schema,
         handler=handler,

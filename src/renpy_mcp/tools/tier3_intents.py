@@ -47,6 +47,7 @@ DEFAULT_SCRIPT = "game/script.rpy"
 
 def register(registry: ToolRegistry, config: ServerConfig, index: ProjectIndex) -> None:
     registry.add(_new_project(config, index))
+    registry.add(_set_start_target(config, index))
     registry.add(_create_scene(config, index))
     registry.add(_create_choice_node(config, index))
     registry.add(_create_route(config, index))
@@ -114,6 +115,28 @@ def _new_project(config: ServerConfig, index: ProjectIndex) -> ToolDef:
         )
         config.bind_project(new_root)
         index.refresh()
+
+        # The scaffold ships an empty `label start: return`. A small model
+        # driving this server end-to-end will write `create_scene` for its
+        # opening label and forget that `start` is what runs at New Game.
+        # Surface the wiring step explicitly so the agent doesn't ship a
+        # game whose first click immediately rolls credits.
+        next_steps = (
+            [
+                "Generate or place backgrounds in <project>/game/images/, then "
+                "register them with add_image_alias.",
+                "Define speaking characters with add_character (one per speaker).",
+                "Author your opening with create_scene (e.g. name=\"opening\").",
+                "Wire the player entry with set_start_target(target=\"opening\") "
+                "so `label start` jumps into your scene.",
+                "Run get_lint_report. Re-run it whenever you doubt the project.",
+            ]
+            if not preexisting
+            else [
+                "Project already scaffolded — session is now bound. "
+                "Use get_project_overview to see what's already authored.",
+            ]
+        )
         return ok(
             {
                 "summary": summary,
@@ -122,6 +145,7 @@ def _new_project(config: ServerConfig, index: ProjectIndex) -> ToolDef:
                 "display_name": display_name,
                 "preexisting": preexisting,
                 "bound": True,
+                "next_steps": next_steps,
             }
         )
 
@@ -136,6 +160,86 @@ def _new_project(config: ServerConfig, index: ProjectIndex) -> ToolDef:
             "`game/script.rpy`, the existing files are left untouched and the "
             "session is just rebound. Call this FIRST when starting from a "
             "single-sentence prompt."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- set_start_target ----------------------------------------------------
+
+
+def _set_start_target(config: ServerConfig, index: ProjectIndex) -> ToolDef:
+    """Rewrite `label start:`'s body to a single `jump <target>`.
+
+    `start` is what runs when the player clicks "New Game" — every other
+    label is unreachable until `start` jumps to it. Without this tool an
+    agent who scaffolds a project, authors an `opening` scene, and then
+    runs the game ends up at the SDK's default end-of-game screen because
+    `start` is still empty. This tool is the explicit wiring step.
+    """
+    schema = {
+        "type": "object",
+        "properties": {
+            "target": {
+                "type": "string",
+                "description": (
+                    "Label name the player should land on first. Must be a "
+                    "valid Python identifier (it is NOT validated for "
+                    "existence — wire forwards before the target exists if "
+                    "you like; lint will flag the missing target until you "
+                    "create it)."
+                ),
+            },
+        },
+        "required": ["target"],
+        "additionalProperties": False,
+    }
+
+    async def handler(arguments: dict[str, Any]) -> list[types.TextContent]:
+        target: str = arguments["target"]
+        if not target.isidentifier():
+            return err(f"`{target}` is not a valid label identifier")
+        if msg := reject_reserved_identifier(target):
+            return err(msg)
+        if target == "start":
+            return err("`target` cannot be `start` — that is what we are rewriting")
+
+        snap = index.snapshot()
+        label = find_single_label(snap.labels, "start")
+        if isinstance(label, str):
+            return err(label)
+
+        rel = label.range.file
+        text = (config.project_root / rel).read_text(encoding="utf-8")
+        lines = text.splitlines()
+        # Replace the entire body (everything from after the header through
+        # the label's end_line, inclusive) with a single `jump <target>`.
+        # `range.start_line` is 1-based and points at `label start:`; the
+        # body lives on lines [start_line, end_line] (1-based, inclusive).
+        # Header is at index `start_line - 1` (0-based).
+        header_idx = label.range.start_line - 1
+        body_end_excl = label.range.end_line  # 1-based inclusive == 0-based exclusive
+        new_body = [f"{BODY_INDENT}jump {target}"]
+        new_lines = lines[: header_idx + 1] + new_body + lines[body_end_excl:]
+        new_text = "\n".join(new_lines) + ("\n" if text.endswith("\n") else "")
+        return write_response(
+            config,
+            index,
+            rel,
+            new_text,
+            summary=f"set start label to jump to `{target}`",
+        )
+
+    return ToolDef(
+        name="set_start_target",
+        description=(
+            "Rewrite `label start:` so its entire body is a single "
+            "`jump <target>`. Use this RIGHT AFTER authoring your opening "
+            "scene with create_scene — without it, the player clicks New "
+            "Game and lands on the empty start label, which immediately "
+            "ends the game. Refuses if no `start` label exists; "
+            "`target` is not validated for existence (forward refs work)."
         ),
         input_schema=schema,
         handler=handler,

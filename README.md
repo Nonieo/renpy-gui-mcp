@@ -26,7 +26,7 @@ If options 2 or 3 sound foreign, see [QUICKSTART.md](QUICKSTART.md) —
 it walks through "I've never used any of this" to "I can preview my
 own VN" in about 15 minutes.
 
-For the under-the-hood story (77 MCP tools, four tiers, a single
+For the under-the-hood story (80 MCP tools, four tiers, a single
 guarded write pipeline that keeps every edit lint-clean), keep reading.
 
 ## What it looks like
@@ -99,15 +99,27 @@ hermes-agent, Cursor, or any MCP client):
 
 ```bash
 pip install git+https://github.com/fracturedring/renpy-mcp
-renpy-mcp --sdk /path/to/renpy-sdk
+renpy-mcp --fetch-sdk        # downloads Ren'Py SDK to ~/.cache/renpy-mcp/
+renpy-mcp                    # auto-picks the cached SDK; no flags needed
 ```
 
-`--project` is optional. When omitted, the server works against
+`--fetch-sdk` is optional — pass `--sdk /path/to/renpy-sdk` (or set
+`$RENPY_SDK`) if you already have the SDK installed. Pin a specific
+version with `--fetch-sdk --sdk-version 8.6.0`.
+
+`--project` is also optional. When omitted, the server works against
 `<cwd>/games/default/` and auto-scaffolds it on first run, so a fresh
-conversation drops into a runnable starting state. Set `$RENPY_SDK`
-instead of `--sdk` if you prefer. Agents should call `new_project` at
-the start of a conversation to get their own named subfolder — see
-[AGENTS.md](AGENTS.md) for the happy-path flow.
+conversation drops into a runnable starting state. Agents should call
+`new_project` at the start of a conversation to get their own named
+subfolder — see [AGENTS.md](AGENTS.md) for the happy-path flow.
+
+For ready-to-paste MCP-server configs that fill in your local install's
+absolute paths, run:
+
+```bash
+renpy-mcp --print-config claude-code  # emits .mcp.json
+renpy-mcp --print-config hermes       # emits ~/.hermes/config.yaml block
+```
 
 **With the RPBuilder GUI** (requires a repo checkout until the frontend
 build ships with the wheel):
@@ -138,7 +150,7 @@ older `gui/run.sh /path/to/project /path/to/sdk` still works.
 
 ## Features
 
-- **77 MCP tools across 4 tiers** (75 default + 2 opt-in) — reads,
+- **80 MCP tools across 4 tiers** (78 default + 2 opt-in) — reads,
   introspection, in-process diagnostics, lifecycle (preview / warp /
   drafting / translation scaffolding / distribute), guarded write
   primitives, high-level authoring intents (`new_project` scaffolds a
@@ -220,16 +232,29 @@ into a named subfolder.
 
 ### hermes-agent
 
-Uses the same `.mcp.json` shape; the harness reads it from
-`~/.config/hermes-agent/mcp.json` or a project-local override. Tools show
-up as `mcp_renpy_<tool_name>`. If you only want the high-level authoring
-surface, filter to Tier 3 via harness-level include/exclude:
+Hermes-agent (NousResearch) uses YAML at `~/.hermes/config.yaml` rather than
+a project-local `.mcp.json`. Drop the contents of
+[`.mcp.example.hermes.yaml`](.mcp.example.hermes.yaml) into the `mcp_servers:`
+key, replacing the placeholder paths. Or have the server emit the right
+snippet with your actual install paths:
+
+```bash
+renpy-mcp --print-config hermes --sdk /path/to/renpy-sdk \
+  >> ~/.hermes/config.yaml
+hermes mcp test renpy   # verify the connection
+```
+
+`--print-config claude-code` is the equivalent for `.mcp.json`. Tools show
+up in hermes as `mcp_renpy_<tool_name>` (e.g. `mcp_renpy_new_project`). If
+you only want the high-level authoring surface, filter to Tier 3 via
+harness-level include/exclude:
 
 ```json
 "tools": {
   "include": [
     "mcp_renpy_new_project",
     "mcp_renpy_get_project_overview",
+    "mcp_renpy_get_media_invariants",
     "mcp_renpy_create_scene",
     "mcp_renpy_create_choice_node",
     "mcp_renpy_create_route",
@@ -238,20 +263,33 @@ surface, filter to Tier 3 via harness-level include/exclude:
     "mcp_renpy_add_image_alias",
     "mcp_renpy_swap_background",
     "mcp_renpy_set_scene_music",
+    "mcp_renpy_set_start_target",
     "mcp_renpy_get_lint_report",
     "mcp_renpy_launch_preview"
   ]
 }
 ```
 
-Or load only specific tiers at the server level: `--tiers 1,3` excludes
-Tier 2 entirely so small models see fewer overlapping options.
+Or load only specific tiers at the server level. Three useful presets:
+
+- `--tiers 1,3` — **recommended for small models.** Reads + high-level
+  intents only (43 tools); no Tier 2 primitives competing with the
+  composers. Tier 3 internally uses the writer pipeline directly, so
+  authoring still works end-to-end.
+- `--tiers 1,2,3` — default. Everything except the escape hatches.
+- `--tiers 1,2,3,4` — adds `apply_unified_diff` and `exec_python_in_init`
+  for cases the structured tools can't express.
 
 Image generation is **not** part of this server — hermes ships a fal
-image tool built in. The flow is: hermes generates the PNG and writes
-it to `<project>/game/images/<name>.png`, then calls
-`mcp_renpy_add_image_alias` to register it. Same pattern for audio
-(drop the file into `<project>/game/audio/`; music is referenced
+image tool built in (`image_generate`, requires `FAL_KEY`). The flow is:
+hermes generates the PNG and writes it to
+`<project>/game/images/<name>.png`, then calls
+`mcp_renpy_add_image_alias` to register it. `add_image_alias` probes the
+asset against MEDIA.md's invariants (1920×1080 backgrounds, 1080-tall
+sprites with alpha, etc) and surfaces deviations as `media_warnings` on
+the response — call `mcp_renpy_get_media_invariants` BEFORE generating to
+pin the right dimensions and avoid a regenerate loop. Same pattern for
+audio (drop the file into `<project>/game/audio/`; music is referenced
 directly by path in `play music` / `set_scene_music`).
 
 ### Cursor and other MCP clients
@@ -322,7 +360,7 @@ end-to-end smoke probes.
 
 ## Status
 
-Alpha. **77 MCP tools** (75 default + 2 opt-in), **337 tests** passing in
+Alpha. **80 MCP tools** (78 default + 2 opt-in), **337 tests** passing in
 ~10 seconds. End-to-end smoke probes:
 `scripts/integration_drive.py` (40-step in-process drive: scaffold →
 author → diagnose → warp → translate → distribute) and
@@ -351,7 +389,7 @@ Deep dive in [DESIGN.md](DESIGN.md).
 
 ## Tier breakdown
 
-- **Tier 1** (default on) — 27 read tools (introspection, structured
+- **Tier 1** (default on) — 29 read tools (introspection, structured
   label-tree read, choice graph, translation coverage, in-process
   diagnostics with sidecar suppression, plus `get_recent_edits` for
   agent self-query of the per-process write history) + 7 lifecycle
@@ -369,10 +407,13 @@ Deep dive in [DESIGN.md](DESIGN.md).
   `apply_write` call), plus `update_menu_choice` (line-precise rewrite
   of a single choice's prompt — paired with the Choice View pill
   editor).
-- **Tier 3** (default on) — 14 high-level authoring intents, including
-  `new_project` (scaffolds a runnable skeleton and rebinds the session)
-  and the three composer tools (`add_screen_layout`, `add_stage`,
-  `add_imagemap`). The Menu Composer panel calls the Tier 2 `add_menu`
+- **Tier 3** (default on) — 15 high-level authoring intents, including
+  `new_project` (scaffolds a runnable skeleton and rebinds the session,
+  returns a `next_steps` array steering small models toward
+  `set_start_target` after authoring), `set_start_target` itself
+  (rewrites `label start:` to a single `jump <target>` so the player
+  actually lands on your opening), and the three composer tools
+  (`add_screen_layout`, `add_stage`, `add_imagemap`). The Menu Composer panel calls the Tier 2 `add_menu`
   primitive directly — it is a single-construct emit, not a true
   composition. Composes multiple Tier 2 writes when the intent calls
   for it; the primary surface for agents.

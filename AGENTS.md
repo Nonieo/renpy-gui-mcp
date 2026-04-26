@@ -15,10 +15,11 @@ the repo is reference material for humans.
   (hermes ships a fal image tool; Claude Code's harness decides what it
   has). Save those files into `<project>/game/images/` or
   `<project>/game/audio/`, then register them through the MCP server.
-  **Before generating, read [MEDIA.md](MEDIA.md)** — it captures every
-  format / dimension / filename rule that makes assets drop in without
-  rework, plus VN-shaped style and tone direction that's
-  provider-agnostic.
+  **Before generating, call `get_media_invariants`** — it returns the
+  structured form of [MEDIA.md](MEDIA.md) (dimensions, alpha rules,
+  audio formats) so you can pin the right shape on the first try and
+  avoid a regenerate loop. `add_image_alias` will surface
+  `media_warnings` if the asset deviates anyway.
 
 ## Default folder
 
@@ -35,9 +36,13 @@ pass arguments, don't concatenate strings.
 
 1. **`new_project`** with `name` set to a short title (e.g. `"Lighthouse
    Keeper"`). The server scaffolds `<cwd>/games/lighthouse_keeper/`
-   from the Ren'Py SDK template and rebinds the session.
-2. **Generate assets through your host harness.** For each background or
-   sprite: call the harness's image tool (hermes: fal), save the PNG into
+   from the Ren'Py SDK template and rebinds the session. The response
+   includes a `next_steps` array — read it; it covers the wiring step
+   most agents forget (`set_start_target`).
+2. **Generate assets through your host harness.** Call
+   `get_media_invariants` first to confirm the dimensions / alpha you
+   need; then for each background or sprite: call the harness's image
+   tool (hermes: fal), save the PNG into
    `<project>/game/images/<name>.png`. For music: save into
    `<project>/game/audio/<name>.ogg`.
 3. **Register assets** so Ren'Py knows about them:
@@ -59,10 +64,14 @@ pass arguments, don't concatenate strings.
      label in one write.
    - `swap_background` / `add_character_to_scene` / `set_scene_music` —
      fine adjustments to an existing scene.
-6. **Verify.** Call `get_lint_report`. If it returns errors, fix them
+6. **Wire the player entry.** Brand-new projects ship with an empty
+   `label start: return`. Call `set_start_target(target="<your opening
+   label>")` so clicking New Game lands the player on your scene. Skip
+   this and the game ends the moment it begins.
+7. **Verify.** Call `get_lint_report`. If it returns errors, fix them
    and re-lint. Treat the lint as the source of truth — a game that
    lints clean will launch.
-7. **Preview.** Call `launch_preview`. It spawns the Ren'Py SDK against
+8. **Preview.** Call `launch_preview`. It spawns the Ren'Py SDK against
    the bound project and returns immediately. Use `get_preview_status`
    to check it; `stop_preview` to close.
 
@@ -103,6 +112,14 @@ Tier 4 (off by default) unlocks `apply_unified_diff` and
 harness to enable Tier 4 when a Tier 2/3 tool genuinely cannot express
 what you need — structured tools catch more mistakes.
 
+## Tool surface size for small models
+
+If you're a low-tier model getting confused by 80 tools, ask the human
+operator to start the server with `--tiers 1,3`. That keeps the reads
+and the high-level intents (43 tools total) while hiding the 27 Tier 2
+primitives that overlap with composers. The intents call the writer
+pipeline directly so authoring still works end-to-end.
+
 ## One-sentence-to-playable sketch
 
 ```
@@ -110,9 +127,12 @@ user: "make a short VN about a lighthouse keeper meeting a selkie"
 
 agent:
   new_project(name="Lighthouse Keeper")
+  get_media_invariants()                     # confirm 1920x1080 bg, 1080-tall sprite + alpha
   # via host harness:
-  #   fal_image(prompt="stormy night, lighthouse on cliff", save_as="...")
-  #   fal_image(prompt="selkie woman in the surf", save_as="...")
+  #   fal_image(prompt="stormy night, lighthouse on cliff",
+  #             width=1920, height=1080, save_as="...")
+  #   fal_image(prompt="selkie woman in the surf, transparent bg",
+  #             width=900, height=1080, save_as="...")
   add_image_alias(name="bg lighthouse", asset="images/bg_lighthouse.png")
   add_image_alias(name="selkie happy", asset="images/selkie_happy.png")
   add_character(var="keeper", display_name="Ewan", color="#335577")
@@ -136,9 +156,11 @@ agent:
     ],
   )
   # ... fill in `approach` / `watch` with create_scene or add_dialogue_block
+  set_start_target(target="opening")          # wire New Game -> opening
   get_lint_report()
   launch_preview()
 ```
 
-That's the whole pattern. Start with `new_project`, end with
+That's the whole pattern. Start with `new_project`, wire `start` with
+`set_start_target` once your opening label exists, end with
 `launch_preview`, `get_lint_report` whenever in doubt.

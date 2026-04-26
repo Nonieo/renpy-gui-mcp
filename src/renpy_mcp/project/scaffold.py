@@ -19,11 +19,12 @@ import shutil
 from pathlib import Path
 
 _MIN_SCRIPT_RPY = """\
-# Entry point. Fill in with create_scene / add_dialogue_block /
-# create_choice_node / etc.
+# Entry point. The `start` label runs first when the player clicks
+# "New Game". Body is intentionally empty — fill it via
+# add_dialogue_block(label="start", lines=[...]) or point start at
+# your real opening with set_start_target(target="<label>").
 
 label start:
-    "A new Ren'Py project, ready for authoring."
     return
 """
 
@@ -93,6 +94,13 @@ def scaffold_project(
     template = _sdk_template_game_dir(sdk_root)
     if template is not None:
         _copy_template(template, game)
+        # The SDK template's script.rpy ships with placeholder dialogue
+        # ("You've created a new Ren'Py game.") and a placeholder Eileen
+        # character. Both pollute list_characters / read_label until the
+        # agent notices and replaces them — which low-tier models often
+        # don't. Overwrite with the same minimal stub the no-SDK path
+        # uses so a fresh project always starts from a clean `label start`.
+        (game / "script.rpy").write_text(_MIN_SCRIPT_RPY, encoding="utf-8")
         # Tweak options.rpy's config.name in-place so the title bar reads
         # the chosen display name, not the SDK's default placeholder.
         _rename_in_options(game / "options.rpy", display_name or root.name)

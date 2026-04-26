@@ -39,21 +39,42 @@ def test_scaffold_is_idempotent(tmp_path: Path):
 
 
 def test_scaffold_prefers_sdk_template_when_available(tmp_path: Path):
-    """Fake an SDK template and confirm scaffold picks it up."""
+    """Fake an SDK template and confirm scaffold picks it up — but
+    deliberately overwrites the SDK's placeholder script.rpy with the
+    minimal stub so fresh projects don't ship with Eileen-says-hi
+    dialogue and a placeholder Character() definition."""
     fake_sdk = tmp_path / "fake_sdk"
     template = fake_sdk / "gui" / "game"
     template.mkdir(parents=True)
+    # SDK-flavoured script.rpy: this is what the real SDK ships, and we
+    # want scaffold_project to NOT preserve it.
     (template / "script.rpy").write_text(
-        "# sentinel from fake SDK template\nlabel start:\n    return\n"
+        '# Sentinel: the real SDK ships placeholder dialogue here.\n'
+        'define e = Character("Eileen")\n'
+        'label start:\n'
+        '    e "You\'ve created a new Ren\'Py game."\n'
+        '    return\n'
+    )
+    (template / "options.rpy").write_text(
+        '## options.rpy template\ndefine config.name = _("My Game")\n'
     )
     (template / "testcases.rpy").write_text("# skip me\n")
 
     proj = tmp_path / "fresh"
     summary = scaffold_project(proj, display_name="Fresh", sdk_root=fake_sdk)
     assert "from SDK template" in summary
-    assert "sentinel from fake SDK template" in (proj / "game" / "script.rpy").read_text()
+    script_text = (proj / "game" / "script.rpy").read_text()
+    # The SDK placeholder content must be gone.
+    assert "Sentinel" not in script_text
+    assert "You've created" not in script_text
+    assert 'Character("Eileen")' not in script_text
+    # The minimal stub's clean `label start: return` body is what we keep.
+    assert "label start:" in script_text
+    assert "return" in script_text
     # testcases.rpy is deliberately skipped — it's the SDK's test-harness template.
     assert not (proj / "game" / "testcases.rpy").exists()
+    # options.rpy is preserved (with config.name rewritten).
+    assert (proj / "game" / "options.rpy").is_file()
 
 
 def test_scaffold_rewrites_config_and_build_name(tmp_path: Path):
