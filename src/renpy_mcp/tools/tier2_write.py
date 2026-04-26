@@ -23,6 +23,7 @@ from ..guardrails.reserved import reject_reserved_identifier
 from ..project.canvas import CanvasError, set_positions
 from ..project.diagnostics import DiagnosticsError, set_ignored
 from ..project.label_tree import iter_statements, parse_label_from_disk
+from ..project.media import compliance_warnings_for_alias
 from ..project.scanner import ProjectIndex
 from ..project.writer import WriteRejected, WriteResult, apply_write
 from ._shared import (
@@ -1014,6 +1015,26 @@ def _add_image_alias(config: ServerConfig, index: ProjectIndex) -> ToolDef:
                 "default": True,
                 "description": "Refuse the write if the asset file does not exist on disk.",
             },
+            "role": {
+                "type": "string",
+                "enum": ["background", "sprite", "cg"],
+                "description": (
+                    "Optional override for MEDIA.md compliance checks. By "
+                    "default the role is inferred from the image name: tag "
+                    "`bg` -> background, `cg` -> CG, anything else -> sprite. "
+                    "Pass this explicitly when the inference is wrong "
+                    "(e.g. `room_overlay` should be `background`)."
+                ),
+            },
+            "skip_media_check": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Skip MEDIA.md dimension/alpha checks. Useful for assets "
+                    "that intentionally deviate (UI overlays, intro splashes). "
+                    "Warnings are non-blocking; this flag only suppresses them."
+                ),
+            },
         },
         "required": ["name", "asset"],
         "additionalProperties": False,
@@ -1024,6 +1045,8 @@ def _add_image_alias(config: ServerConfig, index: ProjectIndex) -> ToolDef:
         asset: str = arguments["asset"]
         rel_file: str = arguments.get("file") or DEFAULT_SCRIPT
         validate_asset: bool = bool(arguments.get("validate_asset", True))
+        role: str | None = arguments.get("role")
+        skip_media_check: bool = bool(arguments.get("skip_media_check", False))
 
         if not _IMAGE_NAME_RE.match(name):
             return err(f"`{name}` is not a valid image name (must be space-separated identifiers)")
@@ -1032,14 +1055,38 @@ def _add_image_alias(config: ServerConfig, index: ProjectIndex) -> ToolDef:
                 f"asset file does not exist: `game/{asset}`; pass `validate_asset: false` to allow placeholder paths"
             )
 
+        # Compute MEDIA.md compliance warnings BEFORE writing so we can
+        # merge them into the response. Non-blocking by design — agents
+        # shouldn't be forced to regenerate art mid-pipeline, but they
+        # should know the asset will look wrong at runtime.
+        media_warnings: list[str] = []
+        if not skip_media_check and (config.game_dir / asset).is_file():
+            media_warnings = compliance_warnings_for_alias(
+                image_name=name,
+                asset_rel=asset,
+                project_root=config.project_root,
+                role=role,
+            )
+
         new_line = f'image {name} = "{asset}"'
         target = config.project_root / rel_file
         original = target.read_text(encoding="utf-8") if target.is_file() else ""
         insertion = find_top_level_decl_insertion(original)
         new_text = splice_line(original, insertion, new_line)
-        return write_response(
+        response = write_response(
             config, index, rel_file, new_text, summary=f"added `image {name}` -> `{asset}`"
         )
+        if not media_warnings:
+            return response
+        # Re-decode the JSON payload to fold media warnings in alongside
+        # the writer's own warnings (tab normalization, etc).
+        import json as _json
+
+        payload = _json.loads(response[0].text)
+        existing_warnings = list(payload.get("warnings") or [])
+        payload["warnings"] = existing_warnings + media_warnings
+        payload["media_warnings"] = media_warnings
+        return [types.TextContent(type="text", text=_json.dumps(payload, indent=2, ensure_ascii=False))]
 
     return ToolDef(
         name="add_image_alias",
@@ -1048,7 +1095,12 @@ def _add_image_alias(config: ServerConfig, index: ProjectIndex) -> ToolDef:
             "follows Ren'Py tag/attribute conventions (space-separated "
             "identifiers). Inserted near other top-level declarations in the "
             "target file. Asset must exist under `game/` unless "
-            "`validate_asset: false`."
+            "`validate_asset: false`. The asset is also probed against "
+            "MEDIA.md's invariants — wrong dimensions for a background, "
+            "missing alpha on a sprite, etc — and any deviations come back "
+            "in `media_warnings` (non-blocking; the write still lands). "
+            "Pass `role` to override inference, `skip_media_check: true` to "
+            "silence the check entirely."
         ),
         input_schema=schema,
         handler=handler,

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -75,7 +77,21 @@ def main() -> int:
         help="comma-separated tier list to load (default: 1,2,3)",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="DEBUG-level stderr logging")
+    parser.add_argument(
+        "--print-config",
+        choices=["claude-code", "hermes"],
+        default=None,
+        help=(
+            "Print a ready-to-paste MCP-server config snippet for the named "
+            "harness, using the current --sdk / --project / --games-root "
+            "values, then exit. `claude-code` emits .mcp.json; `hermes` "
+            "emits the YAML block to merge into ~/.hermes/config.yaml."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.print_config:
+        return _print_harness_config(args)
 
     _configure_logging(args.verbose)
     log = logging.getLogger("renpy_mcp")
@@ -115,6 +131,74 @@ def main() -> int:
         sorted(config.tiers),
     )
     asyncio.run(run_stdio(config))
+    return 0
+
+
+def _print_harness_config(args: argparse.Namespace) -> int:
+    """Emit a ready-to-paste MCP-server config snippet for `args.print_config`.
+
+    Resolves the same default values the server itself would resolve so the
+    snippet works without further user editing. Goes to stdout (not stderr —
+    this output is meant to be piped into a config file). Never spawns the
+    server; just prints and returns 0.
+    """
+    cwd = Path.cwd()
+    # Use sys.executable as-is — resolving the symlink chain on a venv
+    # python lands at the system python, which doesn't have renpy_mcp
+    # installed. The venv's `bin/python` is the path we want the harness
+    # to launch.
+    python = Path(sys.executable)
+    sdk = args.sdk or _default_sdk()
+    games_root = (args.games_root or (cwd / DEFAULT_GAMES_SUBDIR)).resolve()
+    project = args.project.resolve() if args.project else None
+
+    extra_args: list[str] = ["-m", "renpy_mcp"]
+    if sdk is not None:
+        extra_args += ["--sdk", str(sdk.resolve())]
+    extra_args += ["--games-root", str(games_root)]
+    if project is not None:
+        extra_args += ["--project", str(project)]
+    if args.tiers != DEFAULT_TIERS:
+        extra_args += ["--tiers", ",".join(str(t) for t in sorted(args.tiers))]
+
+    if args.print_config == "claude-code":
+        snippet = {
+            "mcpServers": {
+                "renpy": {
+                    "type": "stdio",
+                    "command": str(python),
+                    "args": extra_args,
+                }
+            }
+        }
+        print("// Drop this in .mcp.json next to the directory you open Claude Code in.")
+        print("// Auto-loaded on session start; tools register as mcp__renpy__<tool>.")
+        print(json.dumps(snippet, indent=2))
+        if sdk is None:
+            print(
+                "// NOTE: --sdk was omitted; set $RENPY_SDK in your shell or "
+                "rerun with --sdk PATH so the server can find Ren'Py.",
+                file=sys.stderr,
+            )
+        return 0
+
+    # hermes-agent: YAML block to merge into ~/.hermes/config.yaml.
+    yaml_args = "\n      ".join(f"- {shlex.quote(a)}" for a in extra_args)
+    print("# Merge into ~/.hermes/config.yaml under `mcp_servers:`. After")
+    print("# editing, run `hermes mcp test renpy` to verify the connection.")
+    print("mcp_servers:")
+    print("  renpy:")
+    print(f"    command: {shlex.quote(str(python))}")
+    print(f"    args:")
+    print(f"      {yaml_args}")
+    print("    timeout: 180")
+    print("    connect_timeout: 60")
+    if sdk is None:
+        print(
+            "# NOTE: --sdk was omitted; set $RENPY_SDK in hermes' .env or "
+            "re-run print-config with --sdk PATH.",
+            file=sys.stderr,
+        )
     return 0
 
 

@@ -71,6 +71,93 @@ async def test_new_project_is_idempotent(workspace, tmp_path):
     assert marker.read_bytes() == first_bytes
 
 
+async def test_new_project_returns_actionable_next_steps(workspace):
+    """Fresh scaffolds must point the agent at the wiring step it
+    otherwise forgets — `set_start_target` after authoring."""
+    _, reg, _ = workspace
+    out = parse(await reg.call("new_project", {"name": "fresh_run"}))
+    assert out["preexisting"] is False
+    steps = out.get("next_steps")
+    assert isinstance(steps, list) and len(steps) >= 1
+    joined = " ".join(steps)
+    assert "set_start_target" in joined
+    assert "create_scene" in joined
+    assert "get_lint_report" in joined
+
+
+async def test_new_project_next_steps_for_preexisting_skip_wiring(workspace):
+    """If the project already exists, the wiring step is irrelevant —
+    don't push the agent through it again."""
+    _, reg, _ = workspace
+    await reg.call("new_project", {"name": "again"})
+    out2 = parse(await reg.call("new_project", {"name": "again"}))
+    assert out2["preexisting"] is True
+    steps = out2.get("next_steps")
+    assert isinstance(steps, list) and len(steps) == 1
+    assert "already scaffolded" in steps[0]
+
+
+# ---------- set_start_target ---------------------------------------------------
+
+
+async def test_set_start_target_rewrites_start_body(workspace, tmp_path):
+    """Brand-new projects ship with `label start: return`. After authoring
+    `opening` the agent calls set_start_target("opening") to wire the
+    player's first click to the real content."""
+    _, reg, idx = workspace
+    await reg.call("new_project", {"name": "wiring_test"})
+    proj_root = tmp_path / "wiring_test"
+    # Author a scene the player should land on.
+    await reg.call(
+        "create_scene",
+        {
+            "name": "opening",
+            "background": "bg cafe",
+            "ends_with": "return",
+        },
+    )
+    out = parse(await reg.call("set_start_target", {"target": "opening"}))
+    assert "no_op" in out and out["no_op"] is False
+    assert out["summary"].startswith("set start label")
+    script = (proj_root / "game" / "script.rpy").read_text()
+    assert "label start:" in script
+    assert "jump opening" in script
+    # And the start label's body is now exactly that single jump — no
+    # leftover `return` or other content from the scaffold.
+    snap = idx.snapshot()
+    start_label = next(l for l in snap.labels if l.name == "start")
+    body_lines = (
+        script.splitlines()[start_label.range.start_line : start_label.range.end_line]
+    )
+    body = [l for l in body_lines if l.strip()]
+    assert body == ["    jump opening"]
+
+
+async def test_set_start_target_rejects_invalid_identifier(workspace):
+    _, reg, _ = workspace
+    await reg.call("new_project", {"name": "wiring_invalid"})
+    out = parse(await reg.call("set_start_target", {"target": "1invalid"}))
+    assert "not a valid label identifier" in out["error"]
+
+
+async def test_set_start_target_rejects_self_loop(workspace):
+    _, reg, _ = workspace
+    await reg.call("new_project", {"name": "wiring_self"})
+    out = parse(await reg.call("set_start_target", {"target": "start"}))
+    assert "cannot be `start`" in out["error"]
+
+
+async def test_set_start_target_forward_ref_allowed(workspace, tmp_path):
+    """Wiring a forward ref before the target exists is allowed — lint
+    catches it later. Same pattern create_choice_node uses."""
+    _, reg, _ = workspace
+    await reg.call("new_project", {"name": "forward_ref"})
+    out = parse(await reg.call("set_start_target", {"target": "future_label"}))
+    assert "no_op" in out and out["no_op"] is False
+    script = (tmp_path / "forward_ref" / "game" / "script.rpy").read_text()
+    assert "jump future_label" in script
+
+
 # ---------- create_scene --------------------------------------------------------
 
 

@@ -25,6 +25,7 @@ from ..project.label_tree import (
     parse_label_body,
     parse_label_from_disk,
 )
+from ..project.media import MEDIA_INVARIANTS
 from ..project import recent as recent_buffer
 from ..project.translations import (
     coverage_summary,
@@ -73,6 +74,7 @@ def register(registry: ToolRegistry, config: ServerConfig, index: ProjectIndex) 
     registry.add(_get_translation_coverage(config))
     registry.add(_find_stale_translations(config))
     registry.add(_get_recent_edits())
+    registry.add(_get_media_invariants())
 
 
 # ---------- get_project_overview ------------------------------------------------
@@ -1386,6 +1388,37 @@ def _get_recent_edits() -> ToolDef:
             "agent self-correction after a multi-step edit. Per-process buffer "
             "of the last 50 writes; a separate `renpy-mcp` instance (e.g. the "
             "GUI's own subprocess) has its own buffer."
+        ),
+        input_schema=schema,
+        handler=handler,
+    )
+
+
+# ---------- get_media_invariants -----------------------------------------------
+
+
+def _get_media_invariants() -> ToolDef:
+    """Return MEDIA.md's "four invariants" as a structured JSON shape.
+
+    Cheaper for an agent to consume than re-reading the prose every turn.
+    The dict mirrors `add_image_alias`'s compliance checks: anything that
+    the warnings flag is encoded here. Read this BEFORE generating images,
+    not after.
+    """
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def handler(_arguments: dict[str, Any]) -> list[types.TextContent]:
+        return _ok(MEDIA_INVARIANTS)
+
+    return ToolDef(
+        name="get_media_invariants",
+        description=(
+            "Return the structured form of MEDIA.md's compatibility rules: "
+            "expected format / size / alpha for backgrounds, sprites, CGs, "
+            "UI; expected format / duration for music, voice, SFX, ambience; "
+            "filename naming rules; directory layout. Call this BEFORE asking "
+            "your image-generation tool for assets, so you can pin the right "
+            "dimensions and ensure sprites come out with alpha."
         ),
         input_schema=schema,
         handler=handler,
