@@ -112,6 +112,14 @@ Tier 4 (off by default) unlocks `apply_unified_diff` and
 harness to enable Tier 4 when a Tier 2/3 tool genuinely cannot express
 what you need — structured tools catch more mistakes.
 
+## Tool surface size for small models
+
+If you're a low-tier model getting confused by 80 tools, ask the human
+operator to start the server with `--tiers 1,3`. That keeps the reads
+and the high-level intents (43 tools total) while hiding the 27 Tier 2
+primitives that overlap with composers. The intents call the writer
+pipeline directly so authoring still works end-to-end.
+
 ## One-sentence-to-playable sketch
 
 ```

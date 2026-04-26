@@ -128,6 +128,63 @@ async def test_get_lint_report_runs(registry):
     out = parse(await registry.call("get_lint_report", {}))
     assert "stdout" in out
     assert "returncode" in out
+    # Structured-findings shape: every lint run, even a clean one, returns
+    # the same envelope. Agents can dispatch on `clean` without parsing
+    # stdout text.
+    assert "findings" in out and isinstance(out["findings"], list)
+    assert "summary" in out and "errors" in out["summary"]
+    assert "clean" in out
+
+
+async def test_get_lint_report_parses_findings_from_stubbed_sdk(registry, monkeypatch):
+    """Stub the SDK invocation so this test runs without RENPY_SDK and
+    pins the shape of the parsed findings end-to-end."""
+    from renpy_mcp import sdk as renpy_sdk
+
+    sample = (
+        "Ren'Py 8.6.0 lint report.\n"
+        "\n"
+        "game/script.rpy:5 The jump is to nonexistent label 'nowhere'.\n"
+        "It is advised to set config.check_conflicting_properties to True.\n"
+        "\n"
+        "Statistics:\n"
+        "\n"
+        "1 errors, 0 warnings, 0 informational messages.\n"
+        "\n"
+        "Lint is not a substitute for thorough testing.\n"
+    )
+
+    async def fake_run_lint(_sdk, _proj):
+        return renpy_sdk.SDKResult(returncode=0, stdout=sample, stderr="")
+
+    monkeypatch.setattr(renpy_sdk, "run_lint", fake_run_lint)
+
+    out = parse(await registry.call("get_lint_report", {}))
+    assert out["clean"] is False
+    assert out["summary"] == {"errors": 1, "warnings": 0, "info": 0, "obsolete": 0}
+    assert len(out["findings"]) == 1
+    finding = out["findings"][0]
+    assert finding["file"] == "game/script.rpy"
+    assert finding["line"] == 5
+    assert finding["severity"] == "error"
+    assert "nonexistent" in finding["message"]
+    assert any("config.check_conflicting" in a for a in out["advisories"])
+
+
+async def test_get_lint_report_include_raw_false_drops_stdout(registry, monkeypatch):
+    """Pass include_raw=false to keep responses small in fast iteration loops."""
+    from renpy_mcp import sdk as renpy_sdk
+
+    async def fake_run_lint(_sdk, _proj):
+        return renpy_sdk.SDKResult(returncode=0, stdout="Statistics:\n\n", stderr="")
+
+    monkeypatch.setattr(renpy_sdk, "run_lint", fake_run_lint)
+
+    out = parse(await registry.call("get_lint_report", {"include_raw": False}))
+    assert "stdout" not in out
+    assert "stderr" not in out
+    assert "statistics" not in out
+    assert "findings" in out
 
 
 # ---------- get_recent_edits ----------------------------------------------------

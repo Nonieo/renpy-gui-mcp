@@ -10,6 +10,7 @@ calling user would expect.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -80,12 +81,25 @@ def test_print_config_includes_explicit_project_when_given(tmp_path: Path):
     assert str(project) in args
 
 
-def test_print_config_warns_when_sdk_missing(tmp_path: Path, monkeypatch):
+def test_print_config_warns_when_sdk_missing(tmp_path: Path):
     """No --sdk and no $RENPY_SDK -> the snippet still prints (so users
-    can fix it up) but the warning lands on stderr."""
-    monkeypatch.delenv("RENPY_SDK", raising=False)
-    proc = _run("--print-config", "hermes", cwd=tmp_path)
+    can fix it up) but the warning lands on stderr and points at
+    `--fetch-sdk` so the agent has a clear next step."""
+    # Strip RENPY_SDK and override the cache dir explicitly — the
+    # subprocess inherits whatever the test runner has set, and on a
+    # warm developer machine that's a real SDK path that would suppress
+    # the warning we're trying to assert.
+    env = {k: v for k, v in os.environ.items() if k != "RENPY_SDK"}
+    env["RENPY_MCP_SDK_CACHE"] = str(tmp_path / "no_cache")
+    proc = subprocess.run(
+        [sys.executable, "-m", "renpy_mcp", "--print-config", "hermes"],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env=env,
+        check=False,
+    )
     assert proc.returncode == 0, proc.stderr
     assert "mcp_servers:" in proc.stdout
     assert "--sdk" not in proc.stdout
-    assert "RENPY_SDK" in proc.stderr or "--sdk" in proc.stderr
+    assert "--fetch-sdk" in proc.stderr
