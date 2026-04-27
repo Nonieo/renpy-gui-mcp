@@ -1,10 +1,5 @@
 # PLAN — MCP spec-fluency review for renpy-mcp
 
-> **Drafting in progress** on branch `claude/improve-mcp-documentation-rq71y`.
-> State, resume prompt, and surfaced conflicts live in
-> [`.claude/HANDOFF.md`](.claude/HANDOFF.md). Remove this banner and the
-> handoff file in the same commit that finalizes the last section.
-
 Spec revision used throughout: **2025-11-25** (the current latest;
 canonical at `https://modelcontextprotocol.io/specification/2025-11-25/`).
 The TS schema lives at
